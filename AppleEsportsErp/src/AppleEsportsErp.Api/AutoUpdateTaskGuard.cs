@@ -59,25 +59,45 @@ public static class AutoUpdateTaskGuard
 
             var tr = $"powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{script}\"";
 
-            // /F replaces whatever is there, on every startup, not only when the task is
-            // missing - the same reason KioskGuard rewrites its own tasks unconditionally: an
-            // existing-but-wrong definition is what let the flicker bug outlive an entire
-            // release, because "it already exists" was mistaken for "it is correct."
-            using var p = Process.Start(new ProcessStartInfo("schtasks.exe",
-                $"/Create /F /TN \"{TaskName}\" /SC MINUTE /MO 15 /RU SYSTEM /RL HIGHEST /TR \"{tr}\"")
+            // ArgumentList, not a hand-built Arguments string. schtasks.exe's /TR value needs a
+            // quote nested inside the outer quoted argument (the install path always has a space
+            // - "Program Files"), and getting that nesting right by hand, character for
+            // character, is exactly the kind of thing that silently breaks in one way on every
+            // single run. That is what was happening here: this failed identically on every
+            // branch, every startup, since the day it shipped (schtasks exit -2147467259).
+            // ArgumentList hands each argument to CreateProcess separately and lets .NET apply
+            // the actual Win32 quoting rules, which is the one thing that reliably gets nested
+            // quotes right.
+            var psi = new ProcessStartInfo("schtasks.exe")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-            });
+            };
+            foreach (var arg in new[]
+            {
+                "/Create", "/F", "/TN", TaskName,
+                "/SC", "MINUTE", "/MO", "15",
+                "/RU", "SYSTEM", "/RL", "HIGHEST",
+                "/TR", tr,
+            })
+                psi.ArgumentList.Add(arg);
+
+            using var p = Process.Start(psi);
 
             p?.WaitForExit(15000);
 
             if (p != null && p.ExitCode == 0)
+            {
                 logger.LogInformation("Auto-update task verified/repaired ✓");
+            }
             else
-                logger.LogWarning("Could not create the auto-update task (schtasks exit {Code})", p?.ExitCode);
+            {
+                var stderr = p?.StandardError.ReadToEnd();
+                logger.LogWarning("Could not create the auto-update task (schtasks exit {Code}): {Error}",
+                    p?.ExitCode, stderr);
+            }
         }
         catch (Exception ex)
         {
