@@ -440,6 +440,15 @@ public class PublicController : ControllerBase
 
         var branchId = pc.BranchId;
 
+        // BranchIsolationAttribute deliberately skips Members ("not branch-scoped" - a member
+        // isn't assigned to one branch the way an operator is), so it never populates this.
+        // But GetOperatorIdAsync/GetShiftIdAsync below both require it to resolve a Member's
+        // request to a branch-specific System Operator, and throw if it's missing - which it
+        // always was here, crashing every member-started session. This endpoint is the one
+        // place that already knows which branch a Member's request belongs to (the PC they
+        // picked), so it fills in what the attribute left blank.
+        HttpContext.Items["BranchId"] = branchId.ToString();
+
         // A member session bills straight out of the Gaming wallet — refuse to start one on an
         // empty wallet. Checked up front so it also covers the reservation auto-start path
         // below, which builds its session directly instead of going through StartSessionAsync.
