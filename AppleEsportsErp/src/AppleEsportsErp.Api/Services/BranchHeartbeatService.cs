@@ -2267,6 +2267,7 @@ public class BranchHeartbeatService : BackgroundService
             member = new Member
             {
                 Id = item.Id,
+                HomeBranchId = item.HomeBranchId,
                 PasswordHash = item.PasswordHash,
                 PasswordChangedAt = item.PasswordChangedAt,
                 GamingBalance = item.GamingBalance,
@@ -2291,6 +2292,15 @@ public class BranchHeartbeatService : BackgroundService
         member.MobileNumber = item.MobileNumber;
         member.Email = item.Email;
         member.Username = item.Username;
+
+        // Head Office's own, stable fact about this member - never contested by what a visiting
+        // branch thinks, so always overwritten, unlike password/balance below. Also backfills
+        // every branch's already-existing copy of a member on the very next heartbeat, not just
+        // new ones - confirmed live at Adajan: this was null on a member whose home branch is
+        // Citylight-144Hz, which silently broke their password reset at Adajan (see
+        // AuthService.ShareMemberResetTokenAsync) with no error anywhere to explain why.
+        if (item.HomeBranchId is { } homeBranchId)
+            member.HomeBranchId = homeBranchId;
 
         // Never store a blank hash - BCrypt.Verify against "" throws rather than returning
         // false, so a member this branch already knew how to log in would suddenly be unable

@@ -478,6 +478,7 @@ public class BranchHeartbeatController : ControllerBase
                 MobileNumber = m.MobileNumber,
                 Email = m.Email,
                 Username = m.Username,
+                HomeBranchId = m.HomeBranchId,
                 PasswordHash = m.PasswordHash,
                 PasswordChangedAt = m.PasswordChangedAt,
                 GamingBalance = m.GamingBalance,

@@ -157,6 +157,17 @@ public class BranchMemberConfigDto
     public string? Username { get; set; }
 
     /// <summary>
+    /// Without this, a branch a member merely visits (not their own) never learns which branch
+    /// is "home" for them - so when that member resets their password there, the step that
+    /// tells Head Office the new token exists (ShareMemberResetTokenAsync) finds HomeBranchId
+    /// null on the local copy and silently gives up, no error anywhere. The email still goes
+    /// out fine (that part never touches this field), so the link just always fails with
+    /// "Invalid or expired reset token" - confirmed live for a member resetting at Adajan whose
+    /// home branch is Citylight-144Hz.
+    /// </summary>
+    public Guid? HomeBranchId { get; set; }
+
+    /// <summary>
     /// Without this, a member's password only ever reached the one branch a targeted
     /// set_member_password command happened to be addressed to - their own HomeBranchId, and
     /// only when set via a phone reset; a password set directly by Super Admin at Head Office
