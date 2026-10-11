@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using BCryptNet = BCrypt.Net.BCrypt;
 using AppleEsportsErp.Application.Constants;
 using AppleEsportsErp.Application.DTOs.Common;
@@ -28,8 +29,9 @@ public class MemberService : IMemberService
     private readonly IOutboxService _outbox;
     private readonly IConfiguration _configuration;
     private readonly IHubNotificationService _hubNotifications;
+    private readonly ILogger<MemberService> _logger;
 
-    public MemberService(IUnitOfWork unitOfWork, IAuditService auditService, JwtTokenService jwt, IEmailService emailService, IAppUrlProvider appUrls, IOutboxService outbox, IConfiguration configuration, IHubNotificationService hubNotifications)
+    public MemberService(IUnitOfWork unitOfWork, IAuditService auditService, JwtTokenService jwt, IEmailService emailService, IAppUrlProvider appUrls, IOutboxService outbox, IConfiguration configuration, IHubNotificationService hubNotifications, ILogger<MemberService> logger)
     {
         _outbox = outbox;
         _unitOfWork = unitOfWork;
@@ -39,9 +41,24 @@ public class MemberService : IMemberService
         _appUrls = appUrls;
         _configuration = configuration;
         _hubNotifications = hubNotifications;
+        _logger = logger;
     }
 
     private static bool IsLocked(DateTimeOffset? lockedUntil) => lockedUntil.HasValue && lockedUntil.Value > DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// BCrypt.Verify throws instead of returning false when the stored value is not a valid
+    /// bcrypt hash, rather than treating it as "does not match" - which took the whole login
+    /// endpoint down with an unhandled 500 for every candidate sharing that identifier, not
+    /// just the one with the bad hash. A malformed hash is still a login that must fail, just
+    /// not by crashing.
+    /// </summary>
+    private static bool PasswordMatches(string password, string? hash)
+    {
+        if (string.IsNullOrEmpty(hash)) return false;
+        try { return BCryptNet.Verify(password, hash); }
+        catch { return false; }
+    }
 
     private static string LockoutMessage(DateTimeOffset lockedUntil)
     {
@@ -597,8 +614,7 @@ public class MemberService : IMemberService
                         (m.Email != null && m.Email.ToLower() == identifier))
             .ToListAsync();
 
-        var member = candidates.FirstOrDefault(m =>
-            !string.IsNullOrEmpty(m.PasswordHash) && BCryptNet.Verify(dto.Password, m.PasswordHash));
+        var member = candidates.FirstOrDefault(m => PasswordMatches(dto.Password, m.PasswordHash));
 
         if (member != null && IsLocked(member.LockedUntil))
             throw new AuthorizationException(LockoutMessage(member.LockedUntil!.Value), "ACCOUNT_LOCKED");
@@ -619,6 +635,33 @@ public class MemberService : IMemberService
                     var resetToken = Guid.NewGuid().ToString("N");
                     candidate.ResetToken = resetToken;
                     candidate.ResetTokenExpiry = DateTimeOffset.UtcNow.AddHours(1);
+
+                    // The reset link always points at Head Office (AppUrlProvider), but this
+                    // token was only ever written into the branch's own local row - Member
+                    // updates were never part of ordinary sync. Without this, Head Office has
+                    // no way to recognise the token and every lockout email's link failed with
+                    // "Invalid or expired reset token" on a token that was never actually spent
+                    // or expired - it just never arrived. Same gap WalletService's own welcome
+                    // email already closes for a first top-up; this is the equivalent for a
+                    // lockout.
+                    if (candidate.HomeBranchId is { } homeBranchId)
+                    {
+                        try
+                        {
+                            await _outbox.RecordEventAsync(homeBranchId, "Member", candidate.Id, "member.reset_requested", new
+                            {
+                                memberId = candidate.Id,
+                                email = candidate.Email,
+                                resetToken,
+                                resetTokenExpiry = candidate.ResetTokenExpiry,
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Could not queue the lockout reset token for member {MemberId} to Head Office.", candidate.Id);
+                        }
+                    }
+
                     await SendLockoutResetEmailAsync(candidate.Email, candidate.FullName, resetToken);
                     await _auditService.LogAsync(new AuditEntry
                     {
