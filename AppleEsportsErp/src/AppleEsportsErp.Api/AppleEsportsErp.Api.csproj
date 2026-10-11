@@ -33,9 +33,9 @@
          the dashboard window had when it said 2.0 for months. Kept in step with the installer's
          AppVersion by hand for now; there is one place to change and a build that disagrees with
          its own installer is worth catching. -->
-    <Version>3.1.69</Version>
-    <FileVersion>3.1.69.0</FileVersion>
-    <AssemblyVersion>3.1.69.0</AssemblyVersion>
+    <Version>3.1.70</Version>
+    <FileVersion>3.1.70.0</FileVersion>
+    <AssemblyVersion>3.1.70.0</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
