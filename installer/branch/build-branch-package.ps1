@@ -34,7 +34,14 @@ New-Item -ItemType Directory -Force $staging, $cache | Out-Null
 Step 1 'Building the dashboard'
 Push-Location (Join-Path $repoRoot 'client')
 try {
+    # Continue, not Stop: vite writes its own progress ("transforming...", "rendering
+    # chunks...") to stderr even on a clean build, and with ErrorActionPreference=Stop,
+    # PowerShell 7 turns every stderr line from a native command into a terminating error -
+    # so this always threw before even reaching the real exit-code check below.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     npm run build 2>&1 | Select-String -Pattern 'error|built in' | Select-Object -Last 1
+    $ErrorActionPreference = $prevEap
     if ($LASTEXITCODE -ne 0) { throw 'The dashboard build failed' }
 }
 finally { Pop-Location }
