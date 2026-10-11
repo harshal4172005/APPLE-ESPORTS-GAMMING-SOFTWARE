@@ -2267,7 +2267,6 @@ public class BranchHeartbeatService : BackgroundService
             member = new Member
             {
                 Id = item.Id,
-                HomeBranchId = item.HomeBranchId,
                 PasswordHash = item.PasswordHash,
                 PasswordChangedAt = item.PasswordChangedAt,
                 GamingBalance = item.GamingBalance,
