@@ -20,9 +20,9 @@
     <Company>Apple Esports</Company>
     <Description>Apple Esports Gaming Cafe ERP — desktop client</Description>
     <Copyright>Apple Esports</Copyright>
-    <Version>3.1.83</Version>
-    <FileVersion>3.1.83.0</FileVersion>
-    <AssemblyVersion>3.1.83.0</AssemblyVersion>
+    <Version>3.1.85</Version>
+    <FileVersion>3.1.85.0</FileVersion>
+    <AssemblyVersion>3.1.85.0</AssemblyVersion>
 
     <!-- Single self-contained .exe: no .NET install needed on the target PC -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
