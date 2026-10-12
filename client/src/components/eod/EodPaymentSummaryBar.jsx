@@ -66,12 +66,11 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
   const creditsPending = report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending').reduce((acc, c) => acc + n(c.creditAmount), 0) || 0;
   const creditCleared = n(report.reconciliation?.creditClearedToday);
 
-  // Owner's own formula, exactly the six rows below with the sign each is shown with: Cash +
-  // Online - Credit + Credit Cleared - Petty Expenses + Cash Add. Owner Withdrawals is
-  // deliberately not part of this - it isn't one of the owner's six terms and isn't shown as a
-  // row in this box either; it still reduces the drawer itself (Expected Drawer, left column).
+  // Owner's own formula: the seven rows below, summed with the sign each is shown with here -
+  // Cash + Online - Credit + Credit Cleared - Petty Expenses + Cash Add - Owner Withdrawals.
   const grandTotal = cashTotal + onlineTotal - creditsPending + creditCleared
-    - n(report.cash.totalPettyExpenses) + n(report.cash.totalCashInwards);
+    - n(report.cash.totalPettyExpenses) + n(report.cash.totalCashInwards)
+    - n(report.cash.totalOwnerWithdrawals);
 
   return (
     <div
@@ -165,13 +164,15 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
             </div>
           </div>
 
-          {/* Right column - the day's money. Exactly Cash + Member, Online, Credit, Credit
-              Cleared, Petty Expense, Cash Add, ending in Overall End Total - the owner's own
-              formula: literally this column's six rows, summed with the sign each is shown
-              with here (see grandTotal above). */}
+          {/* Right column - the day's money. Exactly Cash, Online, Credit, Credit Cleared,
+              Petty Expense, Cash Add, Owner Withdrawals, ending in Overall End Total - the
+              owner's own formula: literally this column's seven rows, summed with the sign
+              each is shown with here (see grandTotal above). "Cash" here is labelled plainly
+              on the owner's own instruction, but the value underneath is unchanged - today's
+              billing cash plus today's member wallet top-ups paid in cash. */}
           <div className="space-y-1.5 text-xs">
             <div className="flex justify-between items-center">
-              <span className="text-text-2">Cash + Member</span>
+              <span className="text-text-2">Cash</span>
               <span className="font-mono text-neon-green">+ ₹{report.cash.totalCashSales}</span>
             </div>
             <div className="flex justify-between items-center">
@@ -194,6 +195,15 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
               <span className="text-text-2">Cash Add</span>
               <span className="font-mono text-neon-green">+ ₹{report.cash.totalCashInwards}</span>
             </div>
+            {/* Shown only on a day something was actually withdrawn - most days this is zero,
+                and a permanent "- ₹0" row here would just be noise. Still subtracted in
+                grandTotal above either way, whether this row is visible or not. */}
+            {n(report.cash.totalOwnerWithdrawals) > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-text-2">Owner Withdrawals</span>
+                <span className="font-mono text-neon-red">- ₹{report.cash.totalOwnerWithdrawals}</span>
+              </div>
+            )}
             <div className="flex justify-between items-center bg-neon-blue/10 px-3 py-1.5 rounded-lg border border-neon-blue/30 mt-1">
               <span className="font-bold text-neon-blue uppercase tracking-widest text-[10px]">Overall End Total</span>
               <span className="font-mono font-bold text-base text-neon-blue">₹{grandTotal.toFixed(2)}</span>
