@@ -1,4 +1,6 @@
 ﻿using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using AppleEsportsErp.Api.Extensions;
@@ -7,6 +9,7 @@ using AppleEsportsErp.Application.DTOs.Auth;
 using AppleEsportsErp.Application.DTOs.Common;
 using AppleEsportsErp.Application.Interfaces;
 using AppleEsportsErp.Application.Constants;
+using AppleEsportsErp.Infrastructure.Configuration;
 
 namespace AppleEsportsErp.Api.Controllers;
 
@@ -19,10 +22,20 @@ namespace AppleEsportsErp.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IConfiguration _configuration;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(IAuthService authService)
+    public AuthController(
+        IAuthService authService,
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        ILogger<AuthController> logger)
     {
         _authService = authService;
+        _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
     }
 
     /// <summary>SOP §6.2: Super Admin Login — POST /api/auth/admin/login</summary>
@@ -180,12 +193,61 @@ public class AuthController : ControllerBase
         return Ok(ApiResponse<LoginResponseDto>.Ok(result));
     }
 
+    /// <summary>
+    /// A member's reset link always points at Head Office (AppUrlProvider - that is the only
+    /// address that means anything in an inbox), but a member requesting one does it from
+    /// whichever branch's own PC they happen to be sitting at. Minting the token locally and
+    /// then telling Head Office about it (ShareMemberResetTokenAsync) meant the token's very
+    /// existence depended on that branch's own sync reaching Head Office - which this whole
+    /// investigation found broken in two separate, compounding ways in one evening (a field
+    /// missing from what gets synced down, then missing from the fingerprint that decides
+    /// whether to sync at all). Both are now fixed, but the dependency itself is still fragile:
+    /// any future branch-sync gap breaks password resets again, silently, the same way.
+    ///
+    /// For a member specifically, this branch now hands the request straight to Head Office
+    /// instead of minting anything locally - Head Office is the only place the link ever gets
+    /// checked against anyway, so there is nothing to mint here and nothing to keep in sync.
+    /// Operators and admins are untouched: they reset at the counter they are standing in front
+    /// of, not from any branch.
+    /// </summary>
     [HttpPost("forgot-password")]
     [AllowAnonymous]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
     {
-        await _authService.InitiatePasswordResetAsync(dto.Email, dto.AccountType);
+        var proxied = dto.AccountType == "member" && !_configuration.IsHeadOffice()
+            && await TryProxyToHeadOfficeAsync("forgot-password", dto);
+
+        if (!proxied)
+            await _authService.InitiatePasswordResetAsync(dto.Email, dto.AccountType);
+
         return Ok(ApiResponse<object>.Ok(new { message = "If that email exists, a reset link has been sent." }));
+    }
+
+    /// <summary>
+    /// Best-effort only: a branch with no internet right now must not block a member who is
+    /// standing right there asking for a reset. Falls back to minting locally (the pre-existing
+    /// behaviour) on any failure - worse than reaching Head Office directly, but never worse
+    /// than before this existed.
+    /// </summary>
+    private async Task<bool> TryProxyToHeadOfficeAsync(string action, object dto)
+    {
+        var headOffice = _configuration["Sync:HeadOfficeUrl"]?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(headOffice)) return false;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(15);
+            var response = await client.PostAsync(
+                $"{headOffice}/api/auth/{action}",
+                new StringContent(JsonSerializer.Serialize(dto), Encoding.UTF8, "application/json"));
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not reach Head Office to proxy a member {Action} request - minting locally instead.", action);
+            return false;
+        }
     }
 
     [HttpPost("reset-password")]
