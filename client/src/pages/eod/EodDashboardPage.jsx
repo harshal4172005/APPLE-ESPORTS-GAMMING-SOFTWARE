@@ -364,10 +364,18 @@ export default function EodDashboardPage() {
         ]),
       });
     } else {
+      // Real money the member actually paid - Cash + Online, deliberately not
+      // paymentMethods.totalWalletTopUps, which bakes the promotional bonus straight into the
+      // figure (confirmed live: a Rs 1000 top-up with a Rs 100 bonus stored as Amount: 1100).
+      // The bonus is the shop's own cost of running the promotion, not money anyone gave us.
+      const realMembershipAmount =
+        Number(report.paymentMethods.totalWalletTopUpsCash) + Number(report.paymentMethods.totalWalletTopUpsOnline);
+
       y = addStatGrid(doc, y, [
-        { label: 'Total Net Revenue', value: `Rs ${report.revenue.netRevenue}` },
+        { label: 'Total Net Revenue', value: `Rs ${(Number(report.revenue.netRevenue) + realMembershipAmount).toFixed(2)}` },
         { label: 'Gaming Revenue', value: `Rs ${report.revenue.totalGamingRevenue}` },
         { label: 'Food Revenue', value: `Rs ${report.revenue.totalFoodRevenue}` },
+        { label: 'Membership Amount', value: `Rs ${realMembershipAmount.toFixed(2)}` },
         { label: 'Credit Cleared', value: `Rs ${report.reconciliation.creditClearedToday}` },
       ]);
       y += 10;
@@ -421,7 +429,7 @@ export default function EodDashboardPage() {
           ['Cash Add', `Rs ${report.cash.totalCashInwards}`],
           ['Overall End Total', `Rs ${overallEndTotal}`],
           ['Member Amount Deductions (Gaming/Food)', `Rs ${report.paymentMethods.totalWalletDeductions}`],
-          ['Member Amount Top-Ups (Cash Collected)', `Rs ${report.paymentMethods.totalWalletTopUps}`],
+          ['Member Amount Top-Ups (Cash Collected)', `Rs ${realMembershipAmount.toFixed(2)}`],
           ['Total Sessions', String(report.operations.totalSessions)],
           ['Total Food Orders', String(report.operations.totalFoodOrders)],
         ],
@@ -845,13 +853,29 @@ export default function EodDashboardPage() {
         </div>
       ) : (report || isRange) ? (
         <>
-          {!isRange && report && (
+          {!isRange && report && (() => {
+            // Real money the member actually paid - Cash + Online, deliberately not
+            // paymentMethods.totalWalletTopUps, which bakes the promotional bonus straight into
+            // the figure (confirmed live: a Rs 1000 top-up with a Rs 100 bonus stored as
+            // Amount: 1100). The bonus is the shop's own cost of running the promotion, not
+            // money anyone gave us.
+            const realMembershipAmount =
+              Number(report.paymentMethods.totalWalletTopUpsCash) + Number(report.paymentMethods.totalWalletTopUpsOnline);
+
+            return (
             <>
               {/* Revenue & Operations Summary Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
                   <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Total Net Revenue</div>
-                  <div className="text-3xl font-mono font-bold text-accent">₹{report.revenue.netRevenue}</div>
+                  {/* Includes today's membership top-ups on the owner's own instruction - not
+                      "earned" revenue in the strict sense (the member hasn't spent it yet), but
+                      real money collected today, which is what this figure is meant to answer
+                      here. Gaming/Food Revenue below stay exactly as earned, so nothing else
+                      reads this split differently than before. */}
+                  <div className="text-3xl font-mono font-bold text-accent">
+                    ₹{(Number(report.revenue.netRevenue) + realMembershipAmount).toFixed(2)}
+                  </div>
                 </div>
                 <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
                   <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Gaming Revenue</div>
@@ -860,6 +884,10 @@ export default function EodDashboardPage() {
                 <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
                   <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Food Revenue</div>
                   <div className="text-2xl font-mono font-bold text-text">₹{report.revenue.totalFoodRevenue}</div>
+                </div>
+                <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
+                  <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Membership Amount</div>
+                  <div className="text-2xl font-mono font-bold text-text">₹{realMembershipAmount.toFixed(2)}</div>
                 </div>
                 <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
                   <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Credit Cleared</div>
@@ -884,7 +912,8 @@ export default function EodDashboardPage() {
                 </div>
               </div>
             </>
-          )}
+            );
+          })()}
 
           {isRange && (() => {
             // A cash register only ever means one shift's drawer - summing "opening balance" or
