@@ -2290,7 +2290,24 @@ public class BranchHeartbeatService : BackgroundService
         member.MemberNumber = item.MemberNumber;
         member.MobileNumber = item.MobileNumber;
         member.Email = item.Email;
-        member.Username = item.Username;
+
+        // Skipped, not taken, when a DIFFERENT local row already holds this username -
+        // IX_members_Username is a real unique index here, so assigning it anyway would throw
+        // and take every other field on this member down with it in the one SaveChangesAsync
+        // below (HomeBranchId, PasswordHash, balance - all or nothing). Confirmed live: two
+        // separate members sat stuck for hours, nothing ever landing for either one, because a
+        // stale duplicate row elsewhere already held the exact username being pushed down.
+        if (string.IsNullOrWhiteSpace(item.Username))
+        {
+            member.Username = null;
+        }
+        else if (!string.Equals(member.Username, item.Username, StringComparison.Ordinal))
+        {
+            var usernameTaken = await db.Members.AnyAsync(
+                m => m.Id != item.Id && m.Username == item.Username, ct);
+            if (!usernameTaken)
+                member.Username = item.Username;
+        }
 
         // Head Office's own, stable fact about this member - never contested by what a visiting
         // branch thinks, so always overwritten, unlike password/balance below. Also backfills

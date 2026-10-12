@@ -61,23 +61,17 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
   // counter - two counters, one till. Top-ups are split by how they were actually paid (the
   // server tracks this per row) rather than lumped into cash regardless of method, which used
   // to overstate the drawer by the full value of every UPI top-up.
-  //
-  // Cash In (a manual Cash Desk entry - restocking change, a found note, etc.) was computed on
-  // the server all along (report.cash.totalCashInwards) but never actually added in here, so
-  // Expected Drawer Total (driven by the register directly) went up the moment someone logged
-  // one, while this screen's own Cash/Overall End Total silently did not - the exact mismatch
-  // this fixes.
-  const cashTotal = n(pm.totalCash) + n(pm.totalWalletTopUpsCash) + n(report.cash.totalCashInwards) - n(report.cash.totalPettyExpenses) - n(report.cash.totalOwnerWithdrawals);
+  const cashTotal = n(pm.totalCash) + n(pm.totalWalletTopUpsCash);
   const onlineTotal = n(pm.totalOnline) + n(pm.totalWalletTopUpsOnline);
-
-  // The Total Amount at the bottom is exactly the sum of the two rows above it that are
-  // themselves totals - cash (already net of petty expenses and owner withdrawals) plus
-  // online. Wallet Deductions (shown in the printed EOD report, not here on screen per the
-  // owner's instruction) is deliberately left out of this sum either way: it is a member
-  // spending a balance that was already counted as income when they topped up, and adding it
-  // again is the original bug this screen used to have.
-  const grandTotal = cashTotal + onlineTotal;
   const creditsPending = report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending').reduce((acc, c) => acc + n(c.creditAmount), 0) || 0;
+  const creditCleared = n(report.reconciliation?.creditClearedToday);
+
+  // Owner's own formula, exactly the six rows below with the sign each is shown with: Cash +
+  // Online - Credit + Credit Cleared - Petty Expenses + Cash Add. Owner Withdrawals is
+  // deliberately not part of this - it isn't one of the owner's six terms and isn't shown as a
+  // row in this box either; it still reduces the drawer itself (Expected Drawer, left column).
+  const grandTotal = cashTotal + onlineTotal - creditsPending + creditCleared
+    - n(report.cash.totalPettyExpenses) + n(report.cash.totalCashInwards);
 
   return (
     <div
@@ -171,10 +165,10 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
             </div>
           </div>
 
-          {/* Right column - the day's money. Exactly Cash + Member, Online, Credit, Petty
-              Expense, Cash Add, ending in Overall End Total - whose formula is unchanged
-              (cash net of petty expense and owner withdrawals, plus online; member deductions
-              still excluded, see grandTotal above). */}
+          {/* Right column - the day's money. Exactly Cash + Member, Online, Credit, Credit
+              Cleared, Petty Expense, Cash Add, ending in Overall End Total - the owner's own
+              formula: literally this column's six rows, summed with the sign each is shown
+              with here (see grandTotal above). */}
           <div className="space-y-1.5 text-xs">
             <div className="flex justify-between items-center">
               <span className="text-text-2">Cash + Member</span>
@@ -188,13 +182,9 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
               <span className="text-text-2">Credit</span>
               <span className="font-mono text-neon-red">-₹{creditsPending.toFixed(2)}</span>
             </div>
-            {/* An old debt collected today - shown for visibility only, not added below: it
-                already arrived as cash or online above (whichever way it was paid), the same
-                rupee counted once there. Showing it again here as a second addition would be
-                exactly the double-count this screen used to make with wallet spending. */}
             <div className="flex justify-between items-center">
               <span className="text-text-2">Credit Cleared</span>
-              <span className="font-mono text-neon-green">₹{Number(report.reconciliation?.creditClearedToday ?? 0).toFixed(2)}</span>
+              <span className="font-mono text-neon-green">+ ₹{creditCleared.toFixed(2)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-text-2">Petty Expense</span>
