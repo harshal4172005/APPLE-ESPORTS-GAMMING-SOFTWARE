@@ -407,26 +407,34 @@ export default function EodDashboardPage() {
       const creditsPending = (report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending')
         .reduce((acc, c) => acc + c.creditAmount, 0) || 0).toFixed(2);
 
-      // Exactly the screen's grandTotal: cash (net of petty expense and owner withdrawals) plus
-      // online. Member deductions excluded - they are a balance already counted as income when
-      // it was topped up, not money arriving today. This used to be computed separately here
-      // and disagreed with the screen; now it is not recomputed, just reproduced the same way.
-      const cashNet = report.paymentMethods.totalCash + report.paymentMethods.totalWalletTopUpsCash
-        + report.cash.totalCashInwards - report.cash.totalPettyExpenses - report.cash.totalOwnerWithdrawals;
+      // Owner's own formula, exactly the screen's grandTotal (EodPaymentSummaryBar.jsx): Cash +
+      // Online - Credit + Credit Cleared - Petty Expenses + Cash Add - Owner Withdrawals -
+      // literally the seven rows below, summed with the sign each is printed with. Not
+      // recomputed differently here; reproduced the same way so the PDF never again disagrees
+      // with the screen it is printed from.
+      const cashTotal = report.paymentMethods.totalCash + report.paymentMethods.totalWalletTopUpsCash;
       const onlineTotal = report.paymentMethods.totalOnline + report.paymentMethods.totalWalletTopUpsOnline;
-      const overallEndTotal = (cashNet + onlineTotal).toFixed(2);
+      const overallEndTotal = (
+        cashTotal + onlineTotal - Number(creditsPending) + Number(report.reconciliation.creditClearedToday)
+        - report.cash.totalPettyExpenses + report.cash.totalCashInwards - report.cash.totalOwnerWithdrawals
+      ).toFixed(2);
 
       y = addTable(doc, y, {
         title, subtitle,
         heading: "The Day's Money",
         head: ['Metric', 'Value'],
         body: [
-          ['Cash + Member', `Rs ${report.cash.totalCashSales}`],
+          ['Cash', `Rs ${report.cash.totalCashSales}`],
           ['Online', `Rs ${onlineTotal.toFixed(2)}`],
           ['Credit', `-Rs ${creditsPending}`],
           ['Credit Cleared', `Rs ${report.reconciliation.creditClearedToday}`],
           ['Petty Expense', `-Rs ${report.cash.totalPettyExpenses}`],
           ['Cash Add', `Rs ${report.cash.totalCashInwards}`],
+          // Only printed on a day something was actually withdrawn - still subtracted into
+          // overallEndTotal above either way.
+          ...(report.cash.totalOwnerWithdrawals > 0
+            ? [['Owner Withdrawals', `-Rs ${report.cash.totalOwnerWithdrawals}`]]
+            : []),
           ['Overall End Total', `Rs ${overallEndTotal}`],
           ['Member Amount Deductions (Gaming/Food)', `Rs ${report.paymentMethods.totalWalletDeductions}`],
           ['Member Amount Top-Ups (Cash Collected)', `Rs ${realMembershipAmount.toFixed(2)}`],
