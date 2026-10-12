@@ -573,9 +573,15 @@ public class BranchHeartbeatController : ControllerBase
         // fix does nothing the one time it matters: nothing else about the member changed, so
         // without it "did anything change?" answers no and the new hash never goes out.
 
+        // HomeBranchId included on purpose, same reasoning as PasswordHash above - without it,
+        // a branch that already has a stale (null) HomeBranchId locally keeps reporting the
+        // same fingerprint it always has, since nothing else about that member changed either.
+        // Head Office then answers "nothing new" forever, and the fix that backfills it
+        // (ApplyOneMemberAsync) never runs because the config never even arrives. Confirmed
+        // live: Adajan sat on this exact gap for 11+ hours straight across hundreds of beats.
         var membersPart = string.Join('\n', config.Members.Select(m => string.Join('',
-            m.Id, m.FullName, m.MemberNumber, m.MobileNumber, m.Email, m.Username, m.PasswordHash, m.PasswordChangedAt,
-            m.GamingBalance, m.FoodBalance, m.BalanceAsOf, m.IsBlocked)));
+            m.Id, m.FullName, m.MemberNumber, m.MobileNumber, m.Email, m.Username, m.HomeBranchId,
+            m.PasswordHash, m.PasswordChangedAt, m.GamingBalance, m.FoodBalance, m.BalanceAsOf, m.IsBlocked)));
 
         var pricingPart = string.Join('\n', config.PricingProfiles.Select(p => string.Join("",
             p.Id, p.Name, p.BaseHourlyRate, p.BufferMinutes, p.IsActive, p.RefreshRate, p.SystemSpecs,
