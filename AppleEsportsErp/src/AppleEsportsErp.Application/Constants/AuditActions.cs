@@ -43,6 +43,11 @@ public static class AuditActions
     /// </summary>
     public const string CreditClear = "credit_clear";
 
+    /// <summary>A member's wallet top-up given on credit (balance granted now, paid later) -
+    /// see MemberTopUpCredit's own docstring for why it's tracked separately from a bill credit.</summary>
+    public const string MemberTopUpCreditGiven = "member_topup_credit_given";
+    public const string MemberTopUpCreditClear = "member_topup_credit_clear";
+
     // Food orders - previously two raw strings ("food_order_create", "food_order_update") that
     // did not live here and were not recognised by anything reading the trail.
     public const string FoodOrderPlace = "food_order_place";

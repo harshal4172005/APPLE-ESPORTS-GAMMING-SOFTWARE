@@ -59,4 +59,26 @@ public class CreditsController : ControllerBase
         );
         return Ok(ApiResponse<CreditDto>.Ok(result));
     }
+
+    /// <summary>A member's wallet top-up given on credit - separate from bill credits above,
+    /// see MemberTopUpCredit's own docstring for why.</summary>
+    [HttpGet("member-topups")]
+    public async Task<IActionResult> GetMemberTopUpCredits([FromQuery] string status = "pending", [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+    {
+        var result = await _creditService.GetMemberTopUpCreditsAsync(GetBranchId(), status, page, pageSize);
+        return Ok(ApiResponse<PaginatedResult<MemberTopUpCreditDto>>.Ok(result));
+    }
+
+    [HttpPost("member-topups/{id}/clear")]
+    public async Task<IActionResult> ClearMemberTopUpCredit(Guid id, [FromBody] ClearCreditDto dto)
+    {
+        var result = await _creditService.ClearMemberTopUpCreditAsync(
+            GetBranchId(),
+            await this.GetOperatorIdAsync(),
+            await this.GetShiftIdAsync(),
+            id,
+            dto
+        );
+        return Ok(ApiResponse<MemberTopUpCreditDto>.Ok(result));
+    }
 }

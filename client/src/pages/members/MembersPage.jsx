@@ -351,11 +351,15 @@ function TopUpModal({ member, isSuperAdmin, onClose, onSuccess }) {
 
           <div>
             <label className="block text-[10px] text-text-3 uppercase tracking-widest font-bold mb-2">Payment Method</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {[
                 { val: 'Cash',   Icon: Banknote,   active: 'bg-neon-blue/15 border-neon-blue text-neon-blue' },
                 { val: 'Online', Icon: CreditCard, active: 'bg-neon-purple/15 border-neon-purple text-neon-purple' },
                 { val: 'Split',  Icon: ArrowUpRight, active: 'bg-neon-orange/15 border-neon-orange text-neon-orange' },
+                // Balance granted now, nothing received - tracked on the Credits dashboard as
+                // owed until cleared. Separate from the existing (bill) credit system - see
+                // MemberTopUpCredit's own docstring.
+                { val: 'Credit', Icon: Clock,      active: 'bg-neon-red/15 border-neon-red text-neon-red' },
               ].map(({ val, Icon, active }) => (
                 <button
                   key={val}

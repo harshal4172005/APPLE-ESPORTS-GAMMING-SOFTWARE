@@ -1741,6 +1741,50 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.ToTable("members", (string)null);
                 });
 
+            modelBuilder.Entity("AppleEsportsErp.Domain.Entities.MemberTopUpCredit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ClearedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ClearedByOperatorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("CreditAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("MemberId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BranchId");
+
+                    b.HasIndex("ClearedByOperatorId");
+
+                    b.HasIndex("MemberId");
+
+                    b.HasIndex("OperatorId");
+
+                    b.ToTable("MemberTopUpCredits");
+                });
+
             modelBuilder.Entity("AppleEsportsErp.Domain.Entities.OfflineSyncBilling", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3574,6 +3618,39 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("HomeBranch");
+                });
+
+            modelBuilder.Entity("AppleEsportsErp.Domain.Entities.MemberTopUpCredit", b =>
+                {
+                    b.HasOne("AppleEsportsErp.Domain.Entities.Branch", "Branch")
+                        .WithMany()
+                        .HasForeignKey("BranchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AppleEsportsErp.Domain.Entities.Operator", "ClearedByOperator")
+                        .WithMany()
+                        .HasForeignKey("ClearedByOperatorId");
+
+                    b.HasOne("AppleEsportsErp.Domain.Entities.Member", "Member")
+                        .WithMany()
+                        .HasForeignKey("MemberId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("AppleEsportsErp.Domain.Entities.Operator", "Operator")
+                        .WithMany()
+                        .HasForeignKey("OperatorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Branch");
+
+                    b.Navigation("ClearedByOperator");
+
+                    b.Navigation("Member");
+
+                    b.Navigation("Operator");
                 });
 
             modelBuilder.Entity("AppleEsportsErp.Domain.Entities.Operator", b =>
