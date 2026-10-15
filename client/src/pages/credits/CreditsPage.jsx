@@ -57,10 +57,29 @@ export default function CreditsPage() {
     if (!targetBranchId) return;
     try {
       setIsLoading(true);
-      const res = await api.get('/credits', { 
-        params: { status: filter, page: 1, pageSize: 100 }
-      });
-      setCredits(res.data.data?.items || []);
+      const [billRes, topUpRes] = await Promise.all([
+        api.get('/credits', { params: { status: filter, page: 1, pageSize: 100 } }),
+        api.get('/credits/member-topups', { params: { status: filter, page: 1, pageSize: 100 } }),
+      ]);
+      const billCredits = (billRes.data.data?.items || []).map(c => ({ ...c, source: 'bill' }));
+      // Normalized to the exact shape the table/modal below already read, rather than teaching
+      // either one a second shape - a member top-up credit has no bill or PC behind it (see
+      // MemberTopUpCredit's own docstring), so those fields are filled with the member's own
+      // identity and a label instead.
+      const topUpCredits = (topUpRes.data.data?.items || []).map(c => ({
+        id: c.id,
+        customerName: c.memberName,
+        customerPhone: c.memberUsername,
+        pcNumber: 'Member Top-Up',
+        originalBillAmount: c.creditAmount,
+        amountPaidInitially: 0,
+        creditAmount: c.creditAmount,
+        status: c.status,
+        createdAt: c.createdAt,
+        clearedAt: c.clearedAt,
+        source: 'topup',
+      }));
+      setCredits([...billCredits, ...topUpCredits]);
     } catch (err) {
       toast.error('Failed to fetch credits');
     } finally {
@@ -109,7 +128,10 @@ export default function CreditsPage() {
         payload.onlineAmount = parseFloat(upiAmount) || 0;
       }
 
-      await api.post(`/credits/${selectedCredit.id}/clear`, payload);
+      const endpoint = selectedCredit.source === 'topup'
+        ? `/credits/member-topups/${selectedCredit.id}/clear`
+        : `/credits/${selectedCredit.id}/clear`;
+      await api.post(endpoint, payload);
       toast.success('Credit cleared successfully');
       setIsModalOpen(false);
       fetchCredits();
@@ -140,10 +162,13 @@ export default function CreditsPage() {
     return onDay(c.createdAt) || onDay(c.clearedAt);
   };
 
-  const filteredCredits = credits.filter(c =>
-    (!searchQuery || (c.customerName || 'Walk-in').toLowerCase().includes(searchQuery.toLowerCase()))
-    && matchesDate(c)
-  );
+  const filteredCredits = credits
+    .filter(c =>
+      (!searchQuery || (c.customerName || 'Walk-in').toLowerCase().includes(searchQuery.toLowerCase()))
+      && matchesDate(c)
+    )
+    // Two sources merged above - newest first either way, same as the single-source list always was.
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   const creditDue = Number(selectedCredit?.creditAmount) || 0;
   const cashTendered = Number(cashReceived) || 0;

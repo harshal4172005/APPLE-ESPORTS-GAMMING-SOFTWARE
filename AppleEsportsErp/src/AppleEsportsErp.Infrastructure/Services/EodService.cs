@@ -87,6 +87,17 @@ public class EodService : IEodService
 
         var pendingCredits = credits.Where(c => c.Status == "pending").Sum(c => c.CreditAmount);
 
+        // Member top-ups given on credit - a separate table from CustomerCredit above (see
+        // MemberTopUpCredit's own docstring), so deliberately NOT folded into pendingCredits:
+        // that figure reduces Net Revenue, and a top-up credit was never gaming/food revenue to
+        // begin with - it is a wallet balance grant, not a bill. Only shown in CreditLogs/
+        // CreditClearedToday below, which the EOD screen already treats as additional context
+        // rather than inputs to Net Revenue.
+        var memberTopUpCredits = await _unitOfWork.Repository<MemberTopUpCredit>().Query()
+            .Where(c => c.BranchId == branchId && ((c.CreatedAt >= dayStart && c.CreatedAt < dayEnd) || (c.ClearedAt >= dayStart && c.ClearedAt < dayEnd)))
+            .Include(c => c.Member)
+            .ToListAsync();
+
         // Revenue (Gaming / Food)
         report.Revenue.TotalGamingRevenue = completedBills.Sum(b => b.GamingAmount);
         report.Revenue.TotalFoodRevenue = completedBills.Sum(b => b.FoodAmount);
@@ -148,6 +159,15 @@ public class EodService : IEodService
             - report.Reconciliation.Discounts
             - creditGivenToday
             + creditClearedToday;
+
+        // Added after ShouldHaveBeenCollected above, which must stay bill-only - a member
+        // top-up credit was never billed, so it has no place in "should have been collected
+        // against gross billed". The screen's own Credit Cleared row (EodPaymentSummaryBar.jsx)
+        // reads this field directly though, and the owner's instruction was for a top-up credit
+        // to count there once cleared, same as a bill credit does.
+        report.Reconciliation.CreditClearedToday += memberTopUpCredits
+            .Where(c => c.ClearedAt >= dayStart && c.ClearedAt < dayEnd)
+            .Sum(c => c.CreditAmount);
 
         // Only what settled bills - top-ups are not bill payments and belong on the other side.
         report.Reconciliation.ActuallySettled =
@@ -306,6 +326,24 @@ public class EodService : IEodService
             CreatedAt = c.CreatedAt,
             ClearedAt = c.ClearedAt
         }).ToList();
+
+        // Same list, so the screen's own Credit / Credit Cleared rows (which sum straight from
+        // CreditLogs, see EodPaymentSummaryBar.jsx) count a cleared top-up credit without
+        // needing their own separate read. "Member Top-Up" stands in for PC Number - there is
+        // no bill or PC behind this one, see MemberTopUpCredit's own docstring.
+        report.CreditLogs.AddRange(memberTopUpCredits.Select(c => new EodCreditLogDto
+        {
+            CreditId = c.Id,
+            CustomerName = c.Member.FullName,
+            CustomerPhone = c.Member.MobileNumber,
+            PcNumber = "Member Top-Up",
+            OriginalBillAmount = c.CreditAmount,
+            AmountPaidInitially = 0,
+            CreditAmount = c.CreditAmount,
+            Status = c.Status,
+            CreatedAt = c.CreatedAt,
+            ClearedAt = c.ClearedAt
+        }));
 
         return report;
     }

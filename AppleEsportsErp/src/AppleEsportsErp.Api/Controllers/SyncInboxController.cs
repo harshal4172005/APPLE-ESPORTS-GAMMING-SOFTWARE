@@ -387,6 +387,7 @@ public class SyncInboxController : ControllerBase
 
         "cash_register.changed" => 2,
         "customer_credit.changed" => 2,
+        "member_topup_credit.changed" => 2,   // depends on member.created (tier 0)
         "session.stopped" => 2,
         "session.ended" => 2,
         "payment.changed" => 2,   // depends on bill.changed (tier 1)
@@ -504,6 +505,10 @@ public class SyncInboxController : ControllerBase
 
             case "customer_credit.changed":
                 await UpsertRowAsync<CustomerCredit>(held, root);
+                break;
+
+            case "member_topup_credit.changed":
+                await UpsertRowAsync<MemberTopUpCredit>(held, root);
                 break;
 
             // The cash/online/wallet breakdown a bill was actually settled with. See

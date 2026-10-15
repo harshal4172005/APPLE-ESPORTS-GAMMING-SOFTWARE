@@ -111,6 +111,11 @@ public class WalletService : IWalletService
                 throw new AppException("Split cash + online amounts must add up to the total top-up amount.");
         }
 
+        // Balance granted now, nothing received yet - see MemberTopUpCredit's own docstring for
+        // why this writes its own table instead of reusing CustomerCredit (which requires a
+        // bill this top-up doesn't have).
+        var isCredit = dto.PaymentType.Equals("Credit", StringComparison.OrdinalIgnoreCase);
+
         var member = await _unitOfWork.Repository<Member>().GetByIdAsync(memberId)
             ?? throw new NotFoundException("Member not found.");
 
@@ -191,6 +196,35 @@ public class WalletService : IWalletService
                 CreatedAt = DateTimeOffset.UtcNow
             };
             await _unitOfWork.Repository<CashTransaction>().AddAsync(cashTx);
+        }
+
+        // Balance is already granted above (member.GamingBalance/FoodBalance), same as any
+        // other top-up - the member plays now. This just records what's still owed, on its own
+        // table, the Credits dashboard reads it from.
+        if (isCredit)
+        {
+            var topUpCredit = new MemberTopUpCredit
+            {
+                BranchId = branchId,
+                OperatorId = operatorId,
+                MemberId = member.Id,
+                CreditAmount = dto.Amount,
+                Status = "pending",
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
+            await _unitOfWork.Repository<MemberTopUpCredit>().AddAsync(topUpCredit);
+
+            await _auditService.LogAsync(new AuditEntry
+            {
+                OperatorId = operatorId,
+                UserRole = "Operator",
+                UserName = "System",
+                Action = AuditActions.MemberTopUpCreditGiven,
+                BranchId = branchId,
+                TargetType = "member_topup_credit",
+                TargetId = topUpCredit.Id,
+                Details = new { MemberUsername = member.Username, Amount = dto.Amount }
+            });
         }
 
         await _auditService.LogAsync(new AuditEntry

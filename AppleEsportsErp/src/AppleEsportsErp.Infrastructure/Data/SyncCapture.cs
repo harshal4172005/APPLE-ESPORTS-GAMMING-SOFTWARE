@@ -60,6 +60,7 @@ public static class SyncCapture
         [typeof(CashRegister)] = "cash_register",
         [typeof(CashTransaction)] = "cash_transaction",
         [typeof(CustomerCredit)] = "customer_credit",
+        [typeof(MemberTopUpCredit)] = "member_topup_credit",
 
         // The note/coin breakdown behind a register's counted total. Missing from this list
         // entirely until now - the count itself (register.PhysicalCashCounted, via CashRegister
