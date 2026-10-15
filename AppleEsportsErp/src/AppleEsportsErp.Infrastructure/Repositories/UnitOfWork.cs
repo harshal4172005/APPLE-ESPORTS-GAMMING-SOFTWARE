@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using AppleEsportsErp.Application.Interfaces;
 using AppleEsportsErp.Infrastructure.Data;
@@ -43,6 +44,16 @@ public class UnitOfWork : IUnitOfWork
         await _transaction.DisposeAsync();
         _transaction = null;
     }
+
+    /// <summary>
+    /// hashtextextended, not Guid's own GetHashCode - that is only guaranteed stable within one
+    /// process's lifetime, and a second server instance (or this one, restarted) hashing the
+    /// same GUID differently would just never contend with the first at all, silently
+    /// defeating the whole lock. Postgres's own hash is stable everywhere this query runs.
+    /// </summary>
+    public async Task LockAsync(Guid key, CancellationToken ct = default)
+        => await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({key.ToString()}, 0))", ct);
 
     public async Task RollbackTransactionAsync(CancellationToken ct = default)
     {
