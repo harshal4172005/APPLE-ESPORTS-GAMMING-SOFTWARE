@@ -75,7 +75,14 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
 
   return (
     <div
-      style={{ height }}
+      // maxHeight, not height: a dragged/stored height from before Credit, Credit Cleared and
+      // Owner Withdrawals moved out of this bar (up to the stat grid - EodDashboardPage.jsx)
+      // left real dead space below the now-shorter content, on every screen that had ever
+      // dragged or loaded this bar before. Hugging content instead means it is never taller
+      // than what is actually in it, regardless of what height got saved previously - the drag
+      // handle still sets an upper bound, and content taller than that still scrolls (see
+      // overflow-y-auto below), same as it always did.
+      style={{ maxHeight: height }}
       className="fixed bottom-0 left-0 lg:left-[var(--sidebar-offset,240px)] right-0 z-30 bg-bg-2 border-t border-border flex flex-col shadow-[0_-4px_12px_rgba(0,0,0,0.25)] transition-[left] duration-200 ease-in-out"
     >
       {/* Drag handle */}
