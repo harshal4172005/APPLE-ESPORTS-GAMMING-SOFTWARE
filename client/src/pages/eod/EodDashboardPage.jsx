@@ -407,15 +407,16 @@ export default function EodDashboardPage() {
       const creditsPending = (report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending')
         .reduce((acc, c) => acc + c.creditAmount, 0) || 0).toFixed(2);
 
-      // Owner's own formula, exactly the screen's grandTotal (EodPaymentSummaryBar.jsx): Cash +
-      // Online - Credit + Credit Cleared - Petty Expenses + Cash Add - Owner Withdrawals -
-      // literally the seven rows below, summed with the sign each is printed with. Not
-      // recomputed differently here; reproduced the same way so the PDF never again disagrees
-      // with the screen it is printed from.
+      // Exactly the screen's grandTotal (EodPaymentSummaryBar.jsx). Credit and Credit Cleared
+      // are printed below for visibility but deliberately NOT summed in - confirmed live, both
+      // double-count: a pending credit was never collected, so it was never in Cash/Online to
+      // begin with (subtracting it removes money that isn't there); a cleared credit's payment
+      // already flows straight into Cash/Online the moment it's cleared (adding it again counts
+      // that same rupee twice).
       const cashTotal = report.paymentMethods.totalCash + report.paymentMethods.totalWalletTopUpsCash;
       const onlineTotal = report.paymentMethods.totalOnline + report.paymentMethods.totalWalletTopUpsOnline;
       const overallEndTotal = (
-        cashTotal + onlineTotal - Number(creditsPending) + Number(report.reconciliation.creditClearedToday)
+        cashTotal + onlineTotal
         - report.cash.totalPettyExpenses + report.cash.totalCashInwards - report.cash.totalOwnerWithdrawals
       ).toFixed(2);
 
