@@ -525,6 +525,11 @@ public class BillingService : IBillingService
         await _unitOfWork.BeginTransactionAsync();
         try
         {
+            // Serializes concurrent payment attempts on the same bill (double-click, slow-UI
+            // retry) so the second request waits for the first to commit instead of reading a
+            // stale "not completed" and recording a second Payment for the same bill.
+            await _unitOfWork.LockAsync(id);
+
             var bill = await _unitOfWork.Repository<Bill>().Query()
                 .Include(b => b.Items)
                 .Include(b => b.Payments)
