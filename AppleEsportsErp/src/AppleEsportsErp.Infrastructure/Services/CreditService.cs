@@ -266,6 +266,8 @@ public class CreditService : ICreditService
             credit.Status = "cleared";
             credit.ClearedAt = DateTimeOffset.UtcNow;
             credit.ClearedByOperatorId = operatorId;
+            credit.ClearedCashAmount = cashAmountToApply;
+            credit.ClearedOnlineAmount = dto.OnlineAmount;
             _unitOfWork.Repository<MemberTopUpCredit>().Update(credit);
 
             await _auditService.LogAsync(new AuditEntry
