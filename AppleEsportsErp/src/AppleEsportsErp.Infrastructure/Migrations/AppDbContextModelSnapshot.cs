@@ -1756,6 +1756,12 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.Property<Guid?>("ClearedByOperatorId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("ClearedCashAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("ClearedOnlineAmount")
+                        .HasColumnType("numeric");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 

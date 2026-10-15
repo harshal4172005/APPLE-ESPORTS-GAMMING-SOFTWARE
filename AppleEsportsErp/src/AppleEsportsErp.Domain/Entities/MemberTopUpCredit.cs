@@ -24,6 +24,12 @@ public class MemberTopUpCredit
 
     public string Status { get; set; } = "pending"; // "pending" or "cleared"
 
+    // How the cleared amount was actually collected - set only when Status becomes "cleared".
+    // EodService adds these into the day's Cash/Online totals the same way a cleared bill
+    // credit's own Payment row already does, so the drawer and Overall End Total pick it up too.
+    public decimal ClearedCashAmount { get; set; }
+    public decimal ClearedOnlineAmount { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ClearedAt { get; set; }
 

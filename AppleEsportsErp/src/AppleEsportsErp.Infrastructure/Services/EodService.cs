@@ -98,6 +98,15 @@ public class EodService : IEodService
             .Include(c => c.Member)
             .ToListAsync();
 
+        // Money actually collected today by clearing a member top-up credit - a cleared bill
+        // credit's Payment flows into Cash/Online automatically; this is the same thing for a
+        // top-up credit, which has no Payment row to piggyback on (see MemberTopUpCredit.cs).
+        var clearedMemberTopUpCreditsToday = memberTopUpCredits
+            .Where(c => c.ClearedAt >= dayStart && c.ClearedAt < dayEnd)
+            .ToList();
+        var clearedMemberTopUpCashToday = clearedMemberTopUpCreditsToday.Sum(c => c.ClearedCashAmount);
+        var clearedMemberTopUpOnlineToday = clearedMemberTopUpCreditsToday.Sum(c => c.ClearedOnlineAmount);
+
         // Revenue (Gaming / Food)
         report.Revenue.TotalGamingRevenue = completedBills.Sum(b => b.GamingAmount);
         report.Revenue.TotalFoodRevenue = completedBills.Sum(b => b.FoodAmount);
@@ -116,8 +125,8 @@ public class EodService : IEodService
         // whole figure into its cash line - so a UPI top-up inflated the cash the operator was
         // expected to be holding, and they came up short by exactly the amount nobody had
         // handed them.
-        report.PaymentMethods.TotalWalletTopUpsCash = topUps.Sum(w => w.CashAmount);
-        report.PaymentMethods.TotalWalletTopUpsOnline = topUps.Sum(w => w.OnlineAmount);
+        report.PaymentMethods.TotalWalletTopUpsCash = topUps.Sum(w => w.CashAmount) + clearedMemberTopUpCashToday;
+        report.PaymentMethods.TotalWalletTopUpsOnline = topUps.Sum(w => w.OnlineAmount) + clearedMemberTopUpOnlineToday;
 
         // What the shop gave away in promotional bonus. Never money in; the owner is buying
         // loyalty with it, and it appeared nowhere at all before.
@@ -235,7 +244,7 @@ public class EodService : IEodService
         // have, and they show short by exactly the amount nobody ever handed them.
         var cashFromTopUps = walletTxs
             .Where(w => w.Action == WalletAction.Recharge)
-            .Sum(w => w.CashAmount);
+            .Sum(w => w.CashAmount) + clearedMemberTopUpCashToday;
 
         // From payments themselves, filtered to today, rather than a register's own running
         // TotalCashSales column - that column is not split by day, so on a register spanning
