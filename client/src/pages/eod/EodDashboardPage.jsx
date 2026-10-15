@@ -371,12 +371,16 @@ export default function EodDashboardPage() {
       const realMembershipAmount =
         Number(report.paymentMethods.totalWalletTopUpsCash) + Number(report.paymentMethods.totalWalletTopUpsOnline);
 
+      const creditsPending = (report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending')
+        .reduce((acc, c) => acc + c.creditAmount, 0) || 0).toFixed(2);
+
       y = addStatGrid(doc, y, [
         { label: 'Total Net Revenue', value: `Rs ${(Number(report.revenue.netRevenue) + realMembershipAmount).toFixed(2)}` },
         { label: 'Gaming Revenue', value: `Rs ${report.revenue.totalGamingRevenue}` },
         { label: 'Food Revenue', value: `Rs ${report.revenue.totalFoodRevenue}` },
         { label: 'Membership Amount', value: `Rs ${realMembershipAmount.toFixed(2)}` },
-        { label: 'Credit Cleared', value: `Rs ${report.reconciliation.creditClearedToday}` },
+        { label: 'Credit', value: `Rs ${creditsPending}` },
+        { label: 'Credit Settled', value: `Rs ${report.reconciliation.creditClearedToday}` },
       ]);
       y += 10;
 
@@ -404,15 +408,9 @@ export default function EodDashboardPage() {
         ],
       });
 
-      const creditsPending = (report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending')
-        .reduce((acc, c) => acc + c.creditAmount, 0) || 0).toFixed(2);
-
       // Exactly the screen's grandTotal (EodPaymentSummaryBar.jsx). Credit and Credit Cleared
-      // are printed below for visibility but deliberately NOT summed in - confirmed live, both
-      // double-count: a pending credit was never collected, so it was never in Cash/Online to
-      // begin with (subtracting it removes money that isn't there); a cleared credit's payment
-      // already flows straight into Cash/Online the moment it's cleared (adding it again counts
-      // that same rupee twice).
+      // moved up to the stat grid above (their own two boxes) rather than sitting here unsummed
+      // next to a total that no longer includes them - see that stat grid's own comment for why.
       const cashTotal = report.paymentMethods.totalCash + report.paymentMethods.totalWalletTopUpsCash;
       const onlineTotal = report.paymentMethods.totalOnline + report.paymentMethods.totalWalletTopUpsOnline;
       const overallEndTotal = (
@@ -427,8 +425,6 @@ export default function EodDashboardPage() {
         body: [
           ['Cash', `Rs ${report.cash.totalCashSales}`],
           ['Online', `Rs ${onlineTotal.toFixed(2)}`],
-          ['Credit', `-Rs ${creditsPending}`],
-          ['Credit Cleared', `Rs ${report.reconciliation.creditClearedToday}`],
           ['Petty Expense', `-Rs ${report.cash.totalPettyExpenses}`],
           ['Cash Add', `Rs ${report.cash.totalCashInwards}`],
           // Only printed on a day something was actually withdrawn - still subtracted into
@@ -871,10 +867,17 @@ export default function EodDashboardPage() {
             const realMembershipAmount =
               Number(report.paymentMethods.totalWalletTopUpsCash) + Number(report.paymentMethods.totalWalletTopUpsOnline);
 
+            // Moved up here from the Overall End Total bar below (EodPaymentSummaryBar.jsx) -
+            // neither one is summed into that total (both would double-count, see that file's
+            // own comment), so they live here instead as their own reference figures rather
+            // than sitting unsummed next to a total that no longer includes them.
+            const creditsPending = (report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending')
+              .reduce((acc, c) => acc + c.creditAmount, 0) || 0);
+
             return (
             <>
               {/* Revenue & Operations Summary Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                 <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
                   <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Total Net Revenue</div>
                   {/* Includes today's membership top-ups on the owner's own instruction - not
@@ -899,8 +902,12 @@ export default function EodDashboardPage() {
                   <div className="text-2xl font-mono font-bold text-text">₹{realMembershipAmount.toFixed(2)}</div>
                 </div>
                 <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-                  <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Credit Cleared</div>
-                  <div className="text-2xl font-mono font-bold text-text">₹{report.reconciliation.creditClearedToday}</div>
+                  <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Credit</div>
+                  <div className="text-2xl font-mono font-bold text-neon-red">₹{creditsPending.toFixed(2)}</div>
+                </div>
+                <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
+                  <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Credit Settled</div>
+                  <div className="text-2xl font-mono font-bold text-neon-green">₹{report.reconciliation.creditClearedToday}</div>
                 </div>
               </div>
 

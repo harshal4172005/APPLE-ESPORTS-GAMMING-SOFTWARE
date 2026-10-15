@@ -63,15 +63,12 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
   // to overstate the drawer by the full value of every UPI top-up.
   const cashTotal = n(pm.totalCash) + n(pm.totalWalletTopUpsCash);
   const onlineTotal = n(pm.totalOnline) + n(pm.totalWalletTopUpsOnline);
-  const creditsPending = report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending').reduce((acc, c) => acc + n(c.creditAmount), 0) || 0;
-  const creditCleared = n(report.reconciliation?.creditClearedToday);
 
-  // Credit and Credit Cleared are deliberately NOT summed into this total, even though both
-  // are shown as rows below - confirmed live, both would double-count. A pending credit was
-  // never collected, so it was never added into Cash/Online to begin with; subtracting it here
-  // removes money that was never there. A cleared credit's payment already flows straight into
-  // Cash/Online the moment it's cleared (same as any other payment); adding it again here
-  // counts that same rupee a second time. Both rows stay visible for information only.
+  // Credit and Credit Cleared used to be shown as rows here too, unsummed - moved up to their
+  // own two boxes on the stat grid above instead (EodDashboardPage.jsx), rather than sitting
+  // next to a total that was never going to include them: both would double-count if they were
+  // (a pending credit was never collected, so it was never in Cash/Online to begin with; a
+  // cleared credit's payment already flows straight into Cash/Online the moment it's cleared).
   const grandTotal = cashTotal + onlineTotal
     - n(report.cash.totalPettyExpenses) + n(report.cash.totalCashInwards)
     - n(report.cash.totalOwnerWithdrawals);
@@ -168,13 +165,13 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
             </div>
           </div>
 
-          {/* Right column - the day's money: Cash, Online, Credit, Credit Cleared, Petty
-              Expense, Cash Add, Owner Withdrawals, ending in Overall End Total. Credit and
-              Credit Cleared are shown here for visibility only, NOT summed into the total -
-              see grandTotal above for why both would double-count if they were. "Cash" is
-              labelled plainly on the owner's own instruction; the value underneath is
-              unchanged - today's billing cash plus today's member wallet top-ups paid in
-              cash. */}
+          {/* Right column - the day's money: Cash, Online, Petty Expense, Cash Add, Owner
+              Withdrawals, ending in Overall End Total. Credit and Credit Cleared moved up to
+              their own boxes on the stat grid above (EodDashboardPage.jsx) - neither was ever
+              summed into this total (both would double-count), so they no longer sit here
+              unsummed next to it. "Cash" is labelled plainly on the owner's own instruction;
+              the value underneath is unchanged - today's billing cash plus today's member
+              wallet top-ups paid in cash. */}
           <div className="space-y-1.5 text-xs">
             <div className="flex justify-between items-center">
               <span className="text-text-2">Cash</span>
@@ -183,14 +180,6 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
             <div className="flex justify-between items-center">
               <span className="text-text-2">Online</span>
               <span className="font-mono text-text">₹{onlineTotal.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-text-2">Credit</span>
-              <span className="font-mono text-neon-red">-₹{creditsPending.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-text-2">Credit Cleared</span>
-              <span className="font-mono text-neon-green">+ ₹{creditCleared.toFixed(2)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-text-2">Petty Expense</span>
