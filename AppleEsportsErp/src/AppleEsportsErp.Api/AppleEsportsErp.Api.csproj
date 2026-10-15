@@ -34,8 +34,8 @@
          AppVersion by hand for now; there is one place to change and a build that disagrees with
          its own installer is worth catching. -->
     <Version>3.1.94</Version>
-    <FileVersion>3.1.93.0</FileVersion>
-    <AssemblyVersion>3.1.93.0</AssemblyVersion>
+    <FileVersion>3.1.94.0</FileVersion>
+    <AssemblyVersion>3.1.94.0</AssemblyVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
