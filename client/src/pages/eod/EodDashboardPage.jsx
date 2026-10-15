@@ -604,6 +604,37 @@ export default function EodDashboardPage() {
         </div>
       </div>
 
+      {/* Operator's own summary - the detailed Revenue/Credit grid further down is hidden from
+          them (owner's own instruction), so this stands in with just the drawer-facing totals:
+          same Cash/Online/Food figures, same Overall End Total math as EodPaymentSummaryBar.jsx. */}
+      {user?.role === 'operator' && report && !isRange && (() => {
+        const cashTotal = Number(report.paymentMethods.totalCash) + Number(report.paymentMethods.totalWalletTopUpsCash);
+        const onlineTotal = Number(report.paymentMethods.totalOnline) + Number(report.paymentMethods.totalWalletTopUpsOnline);
+        const grandTotal = cashTotal + onlineTotal
+          - Number(report.cash.totalPettyExpenses) + Number(report.cash.totalCashInwards)
+          - Number(report.cash.totalOwnerWithdrawals);
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
+              <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Total</div>
+              <div className="text-2xl font-mono font-bold text-accent">₹{grandTotal.toFixed(2)}</div>
+            </div>
+            <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
+              <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Cash</div>
+              <div className="text-2xl font-mono font-bold text-text">₹{cashTotal.toFixed(2)}</div>
+            </div>
+            <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
+              <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Online</div>
+              <div className="text-2xl font-mono font-bold text-text">₹{onlineTotal.toFixed(2)}</div>
+            </div>
+            <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
+              <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Food</div>
+              <div className="text-2xl font-mono font-bold text-text">₹{report.revenue.totalFoodRevenue}</div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* PC-Wise Personalised Billing Section */}
       <div className="card bg-bg-2 border border-border p-6 rounded-xl">
         <h2 className="font-heading font-extrabold text-sm uppercase tracking-wider text-text flex items-center gap-2 mb-6">
@@ -876,7 +907,10 @@ export default function EodDashboardPage() {
 
             return (
             <>
-              {/* Revenue & Operations Summary Grid */}
+              {/* Revenue & Operations Summary Grid - admin/super_admin only. The operator's own
+                  stand-in (Total/Cash/Online/Food) sits above PC-Wise Personalised Billing
+                  instead, on the owner's own instruction. */}
+              {user?.role !== 'operator' && (
               <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                 <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
                   <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Total Net Revenue</div>
@@ -910,6 +944,7 @@ export default function EodDashboardPage() {
                   <div className="text-2xl font-mono font-bold text-neon-green">₹{report.reconciliation.creditClearedToday}</div>
                 </div>
               </div>
+              )}
 
               {/* Operations Overview */}
               <div className="bg-bg-2 rounded-xl border border-border shadow-lg p-6">
