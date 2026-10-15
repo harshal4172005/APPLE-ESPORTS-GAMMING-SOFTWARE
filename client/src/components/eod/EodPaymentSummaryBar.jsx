@@ -66,9 +66,13 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
   const creditsPending = report.creditLogs?.filter(c => c.status?.toLowerCase() === 'pending').reduce((acc, c) => acc + n(c.creditAmount), 0) || 0;
   const creditCleared = n(report.reconciliation?.creditClearedToday);
 
-  // Owner's own formula: the seven rows below, summed with the sign each is shown with here -
-  // Cash + Online - Credit + Credit Cleared - Petty Expenses + Cash Add - Owner Withdrawals.
-  const grandTotal = cashTotal + onlineTotal - creditsPending + creditCleared
+  // Credit and Credit Cleared are deliberately NOT summed into this total, even though both
+  // are shown as rows below - confirmed live, both would double-count. A pending credit was
+  // never collected, so it was never added into Cash/Online to begin with; subtracting it here
+  // removes money that was never there. A cleared credit's payment already flows straight into
+  // Cash/Online the moment it's cleared (same as any other payment); adding it again here
+  // counts that same rupee a second time. Both rows stay visible for information only.
+  const grandTotal = cashTotal + onlineTotal
     - n(report.cash.totalPettyExpenses) + n(report.cash.totalCashInwards)
     - n(report.cash.totalOwnerWithdrawals);
 
@@ -164,12 +168,13 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
             </div>
           </div>
 
-          {/* Right column - the day's money. Exactly Cash, Online, Credit, Credit Cleared,
-              Petty Expense, Cash Add, Owner Withdrawals, ending in Overall End Total - the
-              owner's own formula: literally this column's seven rows, summed with the sign
-              each is shown with here (see grandTotal above). "Cash" here is labelled plainly
-              on the owner's own instruction, but the value underneath is unchanged - today's
-              billing cash plus today's member wallet top-ups paid in cash. */}
+          {/* Right column - the day's money: Cash, Online, Credit, Credit Cleared, Petty
+              Expense, Cash Add, Owner Withdrawals, ending in Overall End Total. Credit and
+              Credit Cleared are shown here for visibility only, NOT summed into the total -
+              see grandTotal above for why both would double-count if they were. "Cash" is
+              labelled plainly on the owner's own instruction; the value underneath is
+              unchanged - today's billing cash plus today's member wallet top-ups paid in
+              cash. */}
           <div className="space-y-1.5 text-xs">
             <div className="flex justify-between items-center">
               <span className="text-text-2">Cash</span>
