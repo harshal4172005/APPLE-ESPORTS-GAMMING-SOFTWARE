@@ -72,6 +72,8 @@ public class SyncCourierService : BackgroundService
         _logger.LogInformation("Sync Courier service starting. Poll interval: {IntervalSeconds}s, Max attempts: {MaxAttempts}, Batch size: {BatchSize}",
             _pollIntervalSeconds, _maxAttempts, _batchSize);
 
+        await ReviveGatewayCasualtiesAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -173,7 +175,13 @@ public class SyncCourierService : BackgroundService
                 else
                 {
                     var errorMsg = await response.Content.ReadAsStringAsync(cancellationToken);
-                    HandleSyncFailure(context, entries, $"HTTP {response.StatusCode}: {errorMsg}", transportFailure: false);
+                    // 502/503/504 are nginx answering while Head Office's API restarts (every
+                    // deploy) - the same "can't reach it" as the internet being down, not a
+                    // verdict on the record. Counted as refusals, five of them in ~15 seconds
+                    // abandoned whole batches for good.
+                    var headOfficeDown = IsGatewayError(response.StatusCode);
+                    if (headOfficeDown) MarkInternetDown(branchId);
+                    HandleSyncFailure(context, entries, $"HTTP {response.StatusCode}: {errorMsg}", transportFailure: headOfficeDown);
                     _logger.LogWarning("Failed to sync {Count} entries from branch {BranchId}: {Status}", entries.Count, branchId, response.StatusCode);
                 }
             }
@@ -287,6 +295,38 @@ public class SyncCourierService : BackgroundService
                     },
                     headline: $"No internet for {howLong}",
                     footnote: "You are told about this so you know why this branch's figures showed up late. Nothing needs doing."));
+        }
+    }
+
+    private static bool IsGatewayError(System.Net.HttpStatusCode code) =>
+        code is System.Net.HttpStatusCode.BadGateway
+            or System.Net.HttpStatusCode.ServiceUnavailable
+            or System.Net.HttpStatusCode.GatewayTimeout;
+
+    /// <summary>
+    /// Gives back the retry budget to records abandoned only because Head Office was mid-restart
+    /// (see IsGatewayError) before that was treated as an outage. Safe to resend: Head Office
+    /// skips any entry id it has already applied.
+    /// </summary>
+    private async Task ReviveGatewayCasualtiesAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var revived = await db.SyncOutboxEntries
+                .Where(e => e.SyncedAt == null && e.AttemptCount >= _maxAttempts
+                    && (e.LastError!.StartsWith("HTTP BadGateway")
+                        || e.LastError.StartsWith("HTTP ServiceUnavailable")
+                        || e.LastError.StartsWith("HTTP GatewayTimeout")))
+                .ExecuteUpdateAsync(s => s.SetProperty(e => e.AttemptCount, 0), ct);
+
+            if (revived > 0)
+                _logger.LogWarning("Re-queued {Count} sync record(s) abandoned during a Head Office restart.", revived);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not re-queue sync records abandoned during a Head Office restart.");
         }
     }
 
