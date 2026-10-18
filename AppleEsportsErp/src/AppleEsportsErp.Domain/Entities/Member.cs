@@ -26,10 +26,23 @@ public class Member
 
     /// <summary>Whether an incoming password (with this changed-at) should replace this
     /// member's current one - only when it's actually newer, so a late or redelivered sync
-    /// can never undo a password that has already changed again since. Missing timestamps on
-    /// either side fall back to accepting the incoming value, same as before this existed.</summary>
+    /// can never undo a password that has already changed again since. An incoming value with
+    /// no timestamp never beats a local one that has one: Head Office still holds 15 legacy
+    /// hashes with no time, and treating "no time" as newer made every heartbeat put that old
+    /// password back over a reset the operator had just done at the counter.</summary>
     public bool IsPasswordNewer(DateTimeOffset? incomingChangedAt) =>
-        incomingChangedAt is not { } incoming || PasswordChangedAt is not { } local || incoming > local;
+        PasswordChangedAt is not { } local || (incomingChangedAt is { } incoming && incoming > local);
+
+    /// <summary>A new password also lifts any lockout - a member locked out for typing the
+    /// old one would otherwise be told "account locked" for up to 15 minutes after a reset
+    /// that worked.</summary>
+    public void SetPassword(string? hash, DateTimeOffset? changedAt)
+    {
+        PasswordHash = hash;
+        PasswordChangedAt = changedAt;
+        FailedAttempts = 0;
+        LockedUntil = null;
+    }
 
     // Password Reset fields
     public string? ResetToken { get; set; }

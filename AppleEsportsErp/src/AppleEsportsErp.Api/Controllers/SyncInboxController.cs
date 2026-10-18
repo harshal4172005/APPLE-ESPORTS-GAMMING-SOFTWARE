@@ -997,10 +997,11 @@ public class SyncInboxController : ControllerBase
         // password that has already changed again since.
         var incomingPasswordHash = ReadString(root, "passwordHash");
         var incomingPasswordChangedAt = ReadDate(root, "passwordChangedAt");
-        if (!string.IsNullOrWhiteSpace(incomingPasswordHash) && member.IsPasswordNewer(incomingPasswordChangedAt))
+        if (!string.IsNullOrWhiteSpace(incomingPasswordHash)
+            && incomingPasswordHash != member.PasswordHash
+            && member.IsPasswordNewer(incomingPasswordChangedAt))
         {
-            member.PasswordHash = incomingPasswordHash;
-            member.PasswordChangedAt = incomingPasswordChangedAt;
+            member.SetPassword(incomingPasswordHash, incomingPasswordChangedAt);
         }
 
         member.UpdatedAt = ReadDate(root, "updatedAt") ?? held.ReceivedAt;

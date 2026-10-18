@@ -318,8 +318,7 @@ public class MemberService : IMemberService
         if (dto.DisableLogin == true)
         {
             member.Username = null;
-            member.PasswordHash = null;
-            member.PasswordChangedAt = DateTimeOffset.UtcNow;
+            member.SetPassword(null, DateTimeOffset.UtcNow);
         }
         else
         {
@@ -336,10 +335,7 @@ public class MemberService : IMemberService
 
             // Update password if provided
             if (!string.IsNullOrWhiteSpace(dto.Password))
-            {
-                member.PasswordHash = BCryptNet.HashPassword(dto.Password);
-                member.PasswordChangedAt = DateTimeOffset.UtcNow;
-            }
+                member.SetPassword(BCryptNet.HashPassword(dto.Password), DateTimeOffset.UtcNow);
         }
 
         _unitOfWork.Repository<Member>().Update(member);

@@ -753,11 +753,8 @@ public class BranchHeartbeatService : BackgroundService
         // heartbeat push uses - this command can be delivered late (the branch was offline, or
         // it simply took a few heartbeats to land), and applying it blindly could overwrite a
         // password the member set even more recently through some other path with this older one.
-        if (member.IsPasswordNewer(passwordChangedAt))
-        {
-            member.PasswordHash = passwordHash;
-            member.PasswordChangedAt = passwordChangedAt;
-        }
+        var applied = member.IsPasswordNewer(passwordChangedAt);
+        if (applied) member.SetPassword(passwordHash, passwordChangedAt);
         member.ResetToken = null;
         member.ResetTokenExpiry = null;
         await db.SaveChangesAsync(ct);
@@ -771,10 +768,12 @@ public class BranchHeartbeatService : BackgroundService
             TargetType = "member",
             TargetId = memberId,
             BranchId = member.HomeBranchId ?? Guid.Empty,
-            Details = new { memberNumber = member.MemberNumber, viaRemoteCommand = true },
+            Details = new { memberNumber = member.MemberNumber, viaRemoteCommand = true, applied },
         });
 
-        return (true, "Password updated at this branch.");
+        return (true, applied
+            ? "Password updated at this branch."
+            : $"Not applied - this branch already has a newer password (changed {member.PasswordChangedAt:u}).");
     }
 
     /// <summary>
@@ -2330,10 +2329,11 @@ public class BranchHeartbeatService : BackgroundService
         // MemberService.UpdateMemberAsync's own note), and without this a branch that had just
         // been given the real, current password could have it silently overwritten by Head
         // Office's older one on the very next heartbeat.
-        if (!string.IsNullOrWhiteSpace(item.PasswordHash) && member.IsPasswordNewer(item.PasswordChangedAt))
+        if (!string.IsNullOrWhiteSpace(item.PasswordHash)
+            && item.PasswordHash != member.PasswordHash
+            && member.IsPasswordNewer(item.PasswordChangedAt))
         {
-            member.PasswordHash = item.PasswordHash;
-            member.PasswordChangedAt = item.PasswordChangedAt;
+            member.SetPassword(item.PasswordHash, item.PasswordChangedAt);
         }
         member.UpdatedAt = DateTimeOffset.UtcNow;
 
