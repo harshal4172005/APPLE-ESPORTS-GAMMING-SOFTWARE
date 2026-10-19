@@ -812,7 +812,7 @@ public class MemberService : IMemberService
         entries.AddRange(walletTxs.Select(w => new MemberHistoryEntryDto
         {
             Id = w.Id,
-            Type = w.Action == WalletAction.Recharge ? "WalletTopUp" : "WalletDeduction",
+            Type = w.Action is WalletAction.Recharge or WalletAction.Bonus ? "WalletTopUp" : "WalletDeduction",
             Timestamp = w.CreatedAt,
             BranchId = w.BranchId,
             BranchName = w.Branch?.Name ?? "",

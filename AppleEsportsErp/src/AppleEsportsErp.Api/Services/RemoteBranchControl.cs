@@ -296,6 +296,10 @@ public static class BranchCommands
     /// </summary>
     public const string AdminEditMemberValues = "admin_edit_member_values";
 
+    /// <summary>A free bonus added to a member's wallet - never money received, so it carries
+    /// no cash/online and never touches a drawer or EOD. See WalletService.GiveBonusAsync.</summary>
+    public const string GiveMemberBonus = "give_member_bonus";
+
     /// <summary>
     /// A shared food/snacks item's stock moving by some amount at a sibling branch, relayed by
     /// Head Office so this branch's own count moves by the same amount. Carries a delta, not a

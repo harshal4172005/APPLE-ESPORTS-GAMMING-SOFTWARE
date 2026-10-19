@@ -11,7 +11,7 @@ import { useBranch } from '../../contexts/BranchContext';
 import { useToast } from '../../components/ui/Toast';
 import {
   getMembers, getMemberById, registerMember, updateMember,
-  getMemberHistory, topUpWallet, adminEditMemberValues, deleteMember,
+  getMemberHistory, topUpWallet, giveMemberBonus, adminEditMemberValues, deleteMember,
 } from '../../api/members.api';
 import { getWalletTopUpRules } from '../../api/settings.api';
 import { logActivity } from '../../utils/sessionLog';
@@ -668,16 +668,15 @@ function ExtraBonusModal({ member, onClose, onSuccess }) {
     setLoading(true);
     try {
       const dto = {
-        amount: bonusAmount,
+        amount: Math.round(bonusAmount * 100) / 100,
         targetWallet: walletType === 'Gaming' ? 0 : 1,
-        paymentType: 'Cash',
-        bonusPercentOverride: 0,
-        isBonusOnly: true,
         reason: reason.trim() || `Extra ${bonusMode === 'percentage' ? percentValue + '%' : '₹' + bonusAmount.toFixed(0)} bonus`,
       };
 
-      await topUpWallet(member.id, dto);
-      toast.success(`₹${bonusAmount.toFixed(0)} bonus given to ${member.fullName}'s ${walletType} Member Amount`);
+      const res = await giveMemberBonus(member.id, dto);
+      toast.success(res?.queued
+        ? `₹${bonusAmount.toFixed(0)} bonus sent to ${member.fullName}'s branch - it shows in their wallet within seconds (or as soon as that branch updates).`
+        : `₹${bonusAmount.toFixed(0)} bonus given to ${member.fullName}'s ${walletType} Member Amount`);
       onSuccess();
       onClose();
     } catch (err) {

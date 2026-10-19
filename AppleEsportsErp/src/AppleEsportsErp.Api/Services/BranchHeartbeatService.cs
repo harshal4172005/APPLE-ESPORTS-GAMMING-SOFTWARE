@@ -453,6 +453,9 @@ public class BranchHeartbeatService : BackgroundService
             case BranchCommands.AdminEditMemberValues:
                 return await RunAdminEditMemberValuesAsync(scoped, command.Payload, ct);
 
+            case BranchCommands.GiveMemberBonus:
+                return await RunGiveMemberBonusAsync(scoped, command.Id, command.Payload, ct);
+
             case BranchCommands.RelaySharedStockDelta:
                 return await RunRelaySharedStockDeltaAsync(scoped, command.Payload, ct);
 
@@ -826,6 +829,52 @@ public class BranchHeartbeatService : BackgroundService
                 member.HomeBranchId ?? Guid.Empty, adminId, memberId, dto, adminName ?? "Head Office");
 
             return (true, $"Updated at this branch. Gaming balance now Rs {result.GamingBalance}.");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.GetBaseException().Message);
+        }
+    }
+
+    /// <summary>A Head Office free bonus, applied to this branch's own copy of the member -
+    /// see WalletService.GiveBonusAsync.</summary>
+    private static async Task<(bool, string)> RunGiveMemberBonusAsync(
+        IServiceProvider scoped, Guid commandId, string payload, CancellationToken ct)
+    {
+        Guid memberId, actorId;
+        string actorName;
+        Application.DTOs.Wallets.GiveBonusDto dto;
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var root = doc.RootElement;
+            memberId = root.GetProperty("memberId").GetGuid();
+            actorId = root.GetProperty("actorId").GetGuid();
+            actorName = (root.TryGetProperty("actorName", out var n) ? n.GetString() : null) ?? "Head Office";
+            dto = JsonSerializer.Deserialize<Application.DTOs.Wallets.GiveBonusDto>(
+                root.GetProperty("dto").GetRawText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                ?? throw new InvalidOperationException("Empty bonus payload.");
+        }
+        catch
+        {
+            return (false, "The bonus command arrived without a readable member id and amount.");
+        }
+
+        var db = scoped.GetRequiredService<AppDbContext>();
+        if (!await db.Set<Member>().AnyAsync(m => m.Id == memberId, ct))
+            return (false, BranchCommands.MemberNotYetSyncedMessage);
+
+        // A branch database holds exactly one branch row - its own (BranchAdoptionService).
+        var thisBranchId = await db.Branches.Select(b => b.Id).FirstAsync(ct);
+
+        try
+        {
+            var wallet = scoped.GetRequiredService<IWalletService>();
+            // The command id doubles as the wallet transaction id, so a redelivered command
+            // finds its own row and does not give the bonus twice.
+            var tx = await wallet.GiveBonusAsync(thisBranchId, memberId, dto, actorId, actorName, commandId);
+            return (true, $"Bonus of Rs {dto.Amount:0.##} added at this branch. {dto.TargetWallet} balance now Rs {tx.BalanceAfter:0.##}.");
         }
         catch (Exception ex)
         {

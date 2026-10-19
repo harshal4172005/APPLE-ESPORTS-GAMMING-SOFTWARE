@@ -88,7 +88,8 @@ public class BranchHeartbeatController : ControllerBase
     public static readonly TimeSpan MemberPasswordCommandGivenUpAfter = TimeSpan.FromHours(48);
 
     private static TimeSpan GiveUpAfterFor(string commandType) =>
-        commandType == AppleEsportsErp.Api.Services.BranchCommands.SetMemberPassword
+        commandType is AppleEsportsErp.Api.Services.BranchCommands.SetMemberPassword
+                    or AppleEsportsErp.Api.Services.BranchCommands.GiveMemberBonus
             ? MemberPasswordCommandGivenUpAfter
             : CommandGivenUpAfter;
 
@@ -348,7 +349,16 @@ public class BranchHeartbeatController : ControllerBase
         // next heartbeat to pick straight back up, same as a genuine delivery failure already
         // does. GiveUpAfterFor's 48-hour window is still what closes this out for a member that
         // truly never arrives - this only stops the FIRST beat from mistaking "not yet" for "no".
-        if (!dto.Succeeded && dto.Message == AppleEsportsErp.Api.Services.BranchCommands.MemberNotYetSyncedMessage)
+        // Same "not yet" for a branch still on a version that predates this command: it answers
+        // "This branch does not know the command '...' yet." (BranchHeartbeatService's default
+        // case). Failing it lost the instruction for good; waiting lets it run once the branch
+        // updates, within GiveUpAfterFor's window.
+        // Bonus only - a PC-facing command should still fail fast, someone is watching it.
+        var notYetKnown = !dto.Succeeded
+            && command.CommandType == AppleEsportsErp.Api.Services.BranchCommands.GiveMemberBonus
+            && dto.Message?.StartsWith("This branch does not know the command", StringComparison.Ordinal) == true;
+
+        if (notYetKnown || (!dto.Succeeded && dto.Message == AppleEsportsErp.Api.Services.BranchCommands.MemberNotYetSyncedMessage))
         {
             command.ResultMessage = dto.Message;
             await _db.SaveChangesAsync(ct);

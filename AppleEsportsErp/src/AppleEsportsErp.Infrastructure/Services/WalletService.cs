@@ -9,6 +9,7 @@ using AppleEsportsErp.Application.Exceptions;
 using AppleEsportsErp.Application.Interfaces;
 using AppleEsportsErp.Domain.Entities;
 using AppleEsportsErp.Domain.Enums;
+using AppleEsportsErp.Infrastructure.Configuration;
 
 namespace AppleEsportsErp.Infrastructure.Services;
 
@@ -99,8 +100,10 @@ public class WalletService : IWalletService
 
         var isGaming = dto.TargetWallet == WalletType.Gaming;
 
-        // Skip minimum validation for bonus-only transfers (Extra Bonus feature)
-        if (isGaming && dto.Amount < minGamingTopUp && !dto.IsBonusOnly)
+        if (dto.IsBonusOnly)
+            throw new AppException("A bonus is not a top-up - use Extra Bonus, which never counts it as money received.");
+
+        if (isGaming && dto.Amount < minGamingTopUp)
             throw new AppException($"Minimum Gaming wallet top-up is ₹{minGamingTopUp:0}.");
 
         var isSplit = dto.PaymentType.Equals("Split", StringComparison.OrdinalIgnoreCase);
@@ -273,6 +276,110 @@ public class WalletService : IWalletService
         await SendTopUpEmailsAsync(member, dto.Amount, bonusAmount, totalCredit);
 
         return MapToDto(walletTx);
+    }
+
+    /// <summary>
+    /// A free bonus from Super Admin (or an Admin granted member_extra_bonus). Recorded as
+    /// WalletAction.Bonus with no cash/online and no drawer entry: EOD, the cash desk and every
+    /// money report only count Recharge, so it can never show up as money received. The actor
+    /// goes in RemoteAdminId/Name, which has no FK - a Head Office or promoted-operator id would
+    /// fail AdminId's FK to this branch's own users table.
+    /// </summary>
+    public async Task<WalletTransactionDto> GiveBonusAsync(
+        Guid branchId, Guid memberId, GiveBonusDto dto, Guid actorId, string actorName, Guid? transactionId = null)
+    {
+        // A redelivered Head Office command carries the same id - give the bonus once only.
+        if (transactionId is { } existingId
+            && await _unitOfWork.Repository<WalletTransaction>().Query().AsNoTracking().FirstOrDefaultAsync(w => w.Id == existingId) is { } done)
+            return MapToDto(done);
+
+        // Head Office's copy is not what the counter reads - MembersController sends this to
+        // the member's branch instead (same trap as MemberService.AdminEditValuesAsync).
+        if (_configuration.IsHeadOffice())
+            throw new AppException("A bonus has to be applied at the member's branch, not at Head Office.");
+
+        if (dto.Amount <= 0)
+            throw new AppException("Bonus amount must be greater than zero.");
+
+        await _unitOfWork.BeginTransactionAsync();
+        try
+        {
+            var member = await _unitOfWork.Repository<Member>().GetByIdAsync(memberId)
+                ?? throw new NotFoundException("Member not found.");
+
+            var isGaming = dto.TargetWallet == WalletType.Gaming;
+            var balanceBefore = isGaming ? member.GamingBalance : member.FoodBalance;
+            if (isGaming)
+            {
+                member.GamingBalance += dto.Amount;
+                member.TotalGamingBonusEarned += dto.Amount;
+            }
+            else
+            {
+                member.FoodBalance += dto.Amount;
+            }
+            var balanceAfter = isGaming ? member.GamingBalance : member.FoodBalance;
+
+            var occurredAt = DateTimeOffset.UtcNow;
+            member.BalanceAsOf = occurredAt;
+            member.UpdatedAt = occurredAt;
+            _unitOfWork.Repository<Member>().Update(member);
+
+            var walletTx = new WalletTransaction
+            {
+                Id = transactionId ?? Guid.NewGuid(),
+                MemberId = memberId,
+                BranchId = branchId,
+                RemoteAdminId = actorId,
+                RemoteAdminName = actorName,
+                Action = WalletAction.Bonus,
+                TargetWallet = dto.TargetWallet,
+                Amount = dto.Amount,
+                BalanceBefore = balanceBefore,
+                BalanceAfter = balanceAfter,
+                PaymentType = "Bonus",
+                CashAmount = 0,
+                OnlineAmount = 0,
+                BonusAmount = dto.Amount,
+                Reason = string.IsNullOrWhiteSpace(dto.Reason) ? "Extra bonus" : dto.Reason.Trim(),
+                CreatedAt = occurredAt,
+            };
+            await _unitOfWork.Repository<WalletTransaction>().AddAsync(walletTx);
+
+            await _auditService.LogAsync(new AuditEntry
+            {
+                UserId = actorId,
+                UserRole = "Admin",
+                UserName = actorName,
+                Action = "member_bonus_given",
+                BranchId = branchId,
+                TargetType = "member",
+                TargetId = member.Id,
+                Details = new { member.MemberNumber, Amount = dto.Amount, Wallet = dto.TargetWallet.ToString(), walletTx.Reason },
+            });
+
+            await _outbox.RecordEventAsync(branchId, "Member", member.Id, "wallet.bonus_given", new
+            {
+                memberId = member.Id,
+                walletTransactionId = walletTx.Id,
+                amount = dto.Amount,
+                targetWallet = dto.TargetWallet.ToString(),
+                reason = walletTx.Reason,
+                actorId,
+                actorName,
+                gamingBalanceAfter = member.GamingBalance,
+                foodBalanceAfter = member.FoodBalance,
+                occurredAt,
+            });
+
+            await _unitOfWork.CommitTransactionAsync();
+            return MapToDto(walletTx);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackTransactionAsync();
+            throw;
+        }
     }
 
     public async Task<WalletTransactionDto> DeductWalletAsync(Guid branchId, Guid operatorId, Guid? shiftId, Guid memberId, DeductWalletDto dto, bool commit = true)
