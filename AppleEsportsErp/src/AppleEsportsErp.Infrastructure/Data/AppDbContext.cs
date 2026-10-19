@@ -140,9 +140,17 @@ public class AppDbContext : DbContext
             {
                 if (property.ClrType != typeof(Guid)) continue;
 
+                // IsTemporary too, not just an empty value: for a key with a database default EF
+                // keeps the property temporary even after a value is set, then leaves it out of
+                // the INSERT - so Postgres made a second id and SyncCapture had already sent this
+                // one. Every later edit then reached Head Office under the other id, as a second
+                // row (duplicate payments after "Edit payment method", proven on a real database).
                 var tracked = entry.Property(property.Name);
-                if (tracked.CurrentValue is Guid g && g == Guid.Empty)
+                if (tracked.IsTemporary || (tracked.CurrentValue is Guid g && g == Guid.Empty))
+                {
                     tracked.CurrentValue = Guid.NewGuid();
+                    tracked.IsTemporary = false;
+                }
             }
         }
     }

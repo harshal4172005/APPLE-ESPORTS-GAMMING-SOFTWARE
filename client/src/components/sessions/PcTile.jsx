@@ -1,5 +1,5 @@
 import { memo, useState, useEffect, useId } from 'react';
-import { Infinity as InfinityIcon, Timer } from 'lucide-react';
+import { Infinity as InfinityIcon, Timer, UserRound } from 'lucide-react';
 import { motion } from 'framer-motion';
 import api from '../../config/api';
 import { useToast } from '../ui/Toast';
@@ -157,8 +157,11 @@ const PcTile = memo(({ pc, walkinReq, isSelected, onSelect, onQuickStart, onRefr
   // that those two also drive timerLabel, which must keep showing "BILLING" (via style.label)
   // rather than a stale countdown once the session leaves Active.
   const showPlanGlyph = hasOpenSession && !!pc.activeSessionId;
-  const glyphIsPayAsYouGo = showPlanGlyph && !pc.sessionEndTime;
-  const glyphIsPlanTime = showPlanGlyph && !!pc.sessionEndTime;
+  // A member sitting here shows a person instead, so the operator can tell at a glance who is
+  // playing on their own wallet - the owner's request, taking priority over infinity/timer.
+  const glyphIsMember = showPlanGlyph && pc.customerType === 'Member';
+  const glyphIsPayAsYouGo = showPlanGlyph && !glyphIsMember && !pc.sessionEndTime;
+  const glyphIsPlanTime = showPlanGlyph && !glyphIsMember && !!pc.sessionEndTime;
 
   useEffect(() => {
     if (!isActive) return;
@@ -246,10 +249,12 @@ const PcTile = memo(({ pc, walkinReq, isSelected, onSelect, onQuickStart, onRefr
           {/* What the customer is being charged on, said with a picture rather than a symbol. A
               black infinity mark on the screen reads as "no time limit, billed as they go";
               an orange timer reads as "a fixed block of time, counting down". */}
-          {(glyphIsPayAsYouGo || glyphIsPlanTime) && (
+          {(glyphIsMember || glyphIsPayAsYouGo || glyphIsPlanTime) && (
             <foreignObject x="14" y="12" width="36" height="24">
               <div className="flex items-center justify-center w-full h-full gap-0.5">
-                {glyphIsPayAsYouGo ? (
+                {glyphIsMember ? (
+                  <UserRound className={`${sizeStyle.infinity} text-black`} fill="currentColor" strokeWidth={2} />
+                ) : glyphIsPayAsYouGo ? (
                   <InfinityIcon className={`${sizeStyle.infinity} text-black`} strokeWidth={2.5} />
                 ) : (
                   <Timer className={`${sizeStyle.infinity} text-neon-orange`} strokeWidth={2.5} />

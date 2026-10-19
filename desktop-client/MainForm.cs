@@ -51,6 +51,8 @@ public sealed class MainForm : Form
 
     /// <summary>The last "overlay-layout" mode applied, so repeated identical messages are a no-op instead of re-snapping the window on every silent refetch.</summary>
     private string? _overlayMode;
+    private LockGuard? _lockGuardInstance;
+    private LockGuard _lockGuard => _lockGuardInstance ??= new LockGuard(this);
 
     private bool _isFullScreen;
     private FormBorderStyle _borderBeforeFullScreen;
@@ -1377,9 +1379,12 @@ public sealed class MainForm : Form
             var script = Path.Combine(exeDir, "end-session-cleanup.ps1");
             if (!File.Exists(script)) return;   // not installed on this build - nothing to run
 
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("pwsh.exe")
+            // powershell.exe, not pwsh.exe: PowerShell 7 is not part of Windows, so on a gaming
+            // PC this threw (swallowed below) and nothing was ever closed - the game kept
+            // running under the lock screen. Every other script here already uses this one.
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("powershell.exe")
             {
-                ArgumentList = { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script },
+                ArgumentList = { "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", script },
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
@@ -1469,13 +1474,22 @@ public sealed class MainForm : Form
         //
         // The page having spoken is still what gates this - see the constructor for why an older
         // dashboard that cannot drive the window must never be pinned on top.
-        var wantTopMost = mode is not ("bubble" or "panel");
+        // "alert" is the panel shown for the "save your game" warning: floating like the panel,
+        // but above the game - pinned WITHOUT taking focus, so the player is warned rather than
+        // thrown out of a fullscreen match early.
+        var floating = mode is "bubble" or "panel" or "alert";
+        var wantTopMost = !floating;
         if (TopMost != wantTopMost) TopMost = wantTopMost;
+        if (mode == "alert") LockGuard.PinWithoutFocus(Handle, true);
+        else if (_overlayMode == "alert" && floating) LockGuard.PinWithoutFocus(Handle, false);
+
+        if (mode == "full") _lockGuard.Engage();
+        else _lockGuard.Release();
 
         if (mode == _overlayMode) return;
         _overlayMode = mode;
 
-        if (mode != "bubble" && mode != "panel")
+        if (!floating)
         {
             _floatDraggable = false;
             SetFloatingShape(null, Size.Empty);
@@ -1625,7 +1639,11 @@ public sealed class MainForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _web.Dispose();
+        if (disposing)
+        {
+            _lockGuardInstance?.Dispose();
+            _web.Dispose();
+        }
         base.Dispose(disposing);
     }
 }

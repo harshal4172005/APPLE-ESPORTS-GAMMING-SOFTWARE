@@ -165,7 +165,12 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       // 2. Speak the notification
       if ('speechSynthesis' in window) {
         setTimeout(() => {
-          const utterance = new SpeechSynthesisUtterance(`Attention. ${minutes} minute${minutes > 1 ? 's' : ''} remaining.`);
+          // At 5 and 1 minute the game itself is about to be closed (MainForm's end-of-session
+          // cleanup) - say so, so nobody loses an unsaved match without warning.
+          const text = minutes <= 5
+            ? `Attention. ${minutes} minute${minutes > 1 ? 's' : ''} remaining. Please save your game. All games will close when your time ends.`
+            : `Attention. ${minutes} minute${minutes > 1 ? 's' : ''} remaining.`;
+          const utterance = new SpeechSynthesisUtterance(text);
           utterance.rate = 0.9;
           utterance.pitch = 1.1;
           window.speechSynthesis.speak(utterance);
@@ -192,6 +197,11 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
   // The low-balance reminder currently on screen — rendered as a banner, never a popup, so
   // it can't interrupt the customer mid-game. Cleared when they top up or the session ends.
   const [lowBalanceWarning, setLowBalanceWarning] = useState(null);
+
+  // "N minutes left - save your game", shown for 15 seconds at the 5- and 1-minute marks.
+  // UserOverlayApp pops the panel up on top of the game while this is set.
+  const [timeWarning, setTimeWarning] = useState(null);
+  const timeWarningTimerRef = useRef(null);
 
   // Announces the reminder out loud, mirroring the time-remaining alerts.
   const playBalanceAlert = (remaining, minutes) => {
@@ -254,6 +264,7 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       let checkoutSessionId = null;
       let reminderToFire = null;
       let clearWarning = false;
+      let timeWarningToShow = null;
 
       setSessionData(prev => {
         if (!prev) return prev;
@@ -269,8 +280,8 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
         if (isPrepaid && prev.remainingTime > 0) {
           nextTime = prev.remainingTime - 1;
           if (nextTime <= 600 && !fired.has(600)) { fired.add(600); playTimeAlert(10); }
-          else if (nextTime <= 300 && !fired.has(300)) { fired.add(300); playTimeAlert(5); }
-          else if (nextTime <= 60 && !fired.has(60)) { fired.add(60); playTimeAlert(1); }
+          else if (nextTime <= 300 && !fired.has(300)) { fired.add(300); playTimeAlert(5); timeWarningToShow = 5; }
+          else if (nextTime <= 60 && !fired.has(60)) { fired.add(60); playTimeAlert(1); timeWarningToShow = 1; }
         }
 
         // Live-tick the gaming charge for every session type — free during the branch's
@@ -341,6 +352,11 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       });
 
       if (clearWarning) setLowBalanceWarning(null);
+      if (timeWarningToShow) {
+        setTimeWarning(timeWarningToShow);
+        clearTimeout(timeWarningTimerRef.current);
+        timeWarningTimerRef.current = setTimeout(() => setTimeWarning(null), 15000);
+      }
 
       if (reminderToFire) {
         const minutes = minutesRemainingFor(reminderToFire.remaining, reminderToFire.ratePerHour);
@@ -747,7 +763,8 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       pcState,
       memberCheckout,
       lowBalanceWarning,
-      dismissLowBalanceWarning: () => setLowBalanceWarning(null)
+      dismissLowBalanceWarning: () => setLowBalanceWarning(null),
+      timeWarning,
     }}>
       {children}
     </OverlaySocketContext.Provider>
