@@ -39,8 +39,22 @@ public class TopUpWalletDto
 
     public string? Reason { get; set; }
 
-    // Flag to indicate this is a pure bonus transfer (skip minimum top-up validation)
+    // Sent by the old Extra Bonus screen, which recorded a bonus as a cash top-up. Now refused -
+    // a bonus goes through GiveBonusDto instead, which never counts as money received.
     public bool IsBonusOnly { get; set; } = false;
+}
+
+/// <summary>A free bonus: added to the wallet, never counted as cash/online/EOD money.</summary>
+public class GiveBonusDto
+{
+    [Required]
+    [Range(0.01, 1_000_000)]
+    public decimal Amount { get; set; }
+
+    [Required]
+    public WalletType TargetWallet { get; set; }
+
+    public string? Reason { get; set; }
 }
 
 /// <summary>Super Admin (or an Admin explicitly granted the "wallet_settings" permission) editable top-up rules.</summary>

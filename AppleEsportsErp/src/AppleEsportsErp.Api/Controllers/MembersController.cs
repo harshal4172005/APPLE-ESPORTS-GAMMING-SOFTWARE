@@ -18,15 +18,18 @@ namespace AppleEsportsErp.Api.Controllers;
 public class MembersController : ControllerBase
 {
     private readonly IMemberService _memberService;
+    private readonly IWalletService _walletService;
     private readonly AppleEsportsErp.Infrastructure.Data.AppDbContext _db;
     private readonly AppleEsportsErp.Api.Services.IRemoteBranchControl _remote;
 
     public MembersController(
         IMemberService memberService,
+        IWalletService walletService,
         AppleEsportsErp.Infrastructure.Data.AppDbContext db,
         AppleEsportsErp.Api.Services.IRemoteBranchControl remote)
     {
         _memberService = memberService;
+        _walletService = walletService;
         _db = db;
         _remote = remote;
     }
@@ -151,6 +154,48 @@ public class MembersController : ControllerBase
 
         var result = await _memberService.AdminEditValuesAsync(GetBranchId(), adminId, id, dto);
         return Ok(ApiResponse<MemberDto>.Ok(result));
+    }
+
+    /// <summary>Free bonus into a member's wallet - never counted as money received. Super
+    /// Admin always; an Admin only with the member_extra_bonus permission (same check as
+    /// BillingController.ApplyDiscount, since the Dashboard policy lets every Admin through).</summary>
+    [HttpPost("{id:guid}/bonus")]
+    [Idempotent]
+    public async Task<IActionResult> GiveBonus(
+        Guid id, [FromBody] AppleEsportsErp.Application.DTOs.Wallets.GiveBonusDto dto, CancellationToken ct)
+    {
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        var allowed = role == Roles.SuperAdmin;
+        if (!allowed && role == Roles.Admin && User.FindFirstValue("dashboardPermissions") is { Length: > 0 } perms)
+        {
+            try
+            {
+                allowed = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(perms)
+                    ?.GetValueOrDefault("member_extra_bonus") == true;
+            }
+            catch { }
+        }
+        if (!allowed) return Forbid();
+
+        var actorId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var actorName = User.FindFirstValue(ClaimTypes.Name) ?? role!;
+
+        if (_remote.MustTravel)
+        {
+            var homeBranchId = await _db.Set<AppleEsportsErp.Domain.Entities.Member>().AsNoTracking()
+                .Where(m => m.Id == id).Select(m => m.HomeBranchId).FirstOrDefaultAsync(ct);
+
+            if (homeBranchId is null || homeBranchId == Guid.Empty)
+                return NotFound(ApiResponse<object>.Fail(
+                    "Head Office does not know which branch this member belongs to, so the bonus " +
+                    "has nowhere to be sent.", "MEMBER_HOME_BRANCH_UNKNOWN"));
+
+            return await SendToBranchAsync(homeBranchId.Value, AppleEsportsErp.Api.Services.BranchCommands.GiveMemberBonus,
+                new { memberId = id, dto, actorId, actorName }, actorId, ct);
+        }
+
+        var result = await _walletService.GiveBonusAsync(GetBranchId(), id, dto, actorId, actorName);
+        return Ok(ApiResponse<AppleEsportsErp.Application.DTOs.Wallets.WalletTransactionDto>.Ok(result));
     }
 
     /// <summary>Member self-login — POST /api/members/login (no auth required)</summary>

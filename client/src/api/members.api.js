@@ -40,6 +40,13 @@ export const topUpWallet = (memberId, dto) =>
     headers: { 'X-Idempotency-Key': generateIdempotencyKey() },
   }).then(r => r.data?.data);
 
+// Free bonus - never counted as money received. Returns { queued: true, ... } when sent from
+// Head Office to the member's branch, or the wallet transaction when applied at a branch.
+export const giveMemberBonus = (memberId, dto) =>
+  api.post(`/members/${memberId}/bonus`, dto, {
+    headers: { 'X-Idempotency-Key': generateIdempotencyKey() },
+  }).then(r => r.data?.data);
+
 export const deductWallet = (memberId, dto) =>
   api.post(`/wallets/${memberId}/deduct`, dto, {
     headers: { 'X-Idempotency-Key': generateIdempotencyKey() },

@@ -397,6 +397,7 @@ public class SyncInboxController : ControllerBase
         "bill.paid" => 3,
         "payment.recorded" => 3,
         "wallet.topped_up" => 3,
+        "wallet.bonus_given" => 3,
         "member.wallet_toppedup" => 3,
         "wallet.deducted" => 3,
         "food_order.placed" => 3,
@@ -478,6 +479,10 @@ public class SyncInboxController : ControllerBase
 
             case "wallet.deducted":
                 await RecordWalletDeductionAsync(held, root);
+                break;
+
+            case "wallet.bonus_given":
+                await RecordWalletBonusAsync(held, root);
                 break;
 
             // The four End of Day is computed from. Head Office never had any of them, which
@@ -1262,6 +1267,51 @@ public class SyncInboxController : ControllerBase
     /// newer one from a different branch and quietly drag the balance backwards - undoing a
     /// spend nobody undid, or resurrecting money that was already spent elsewhere.
     /// </summary>
+    /// <summary>A free bonus given at the branch (WalletService.GiveBonusAsync). Stored as
+    /// WalletAction.Bonus with no cash/online, so Head Office's EOD and reports - which count
+    /// Recharge only - never treat it as money received.</summary>
+    private async Task RecordWalletBonusAsync(SyncInboxEntry held, JsonElement root)
+    {
+        var txId = ReadGuid(root, "walletTransactionId") ?? held.Id;
+        if (await _db.WalletTransactions.AnyAsync(w => w.Id == txId))
+            return;
+
+        var memberId = ReadGuid(root, "memberId") ?? held.AggregateId;
+        var member = await _db.Members.FirstOrDefaultAsync(m => m.Id == memberId)
+            ?? throw new InvalidOperationException(
+                $"Head Office has no member {memberId}. The member.created event should arrive first.");
+
+        var amount = ReadDecimal(root, "amount") ?? 0m;
+        var isGaming = !string.Equals(ReadString(root, "targetWallet"), "Food", StringComparison.OrdinalIgnoreCase);
+        var gamingAfter = ReadDecimal(root, "gamingBalanceAfter") ?? member.GamingBalance;
+        var foodAfter = ReadDecimal(root, "foodBalanceAfter") ?? member.FoodBalance;
+        var balanceAfter = isGaming ? gamingAfter : foodAfter;
+        var occurredAt = ReadDate(root, "occurredAt") ?? held.OccurredAt;
+
+        _db.WalletTransactions.Add(new WalletTransaction
+        {
+            Id = txId,
+            MemberId = memberId,
+            BranchId = held.BranchId,
+            RemoteAdminId = ReadGuid(root, "actorId"),
+            RemoteAdminName = ReadString(root, "actorName"),
+            Action = WalletAction.Bonus,
+            TargetWallet = isGaming ? WalletType.Gaming : WalletType.Food,
+            Amount = amount,
+            BalanceBefore = balanceAfter - amount,
+            BalanceAfter = balanceAfter,
+            PaymentType = "Bonus",
+            CashAmount = 0,
+            OnlineAmount = 0,
+            BonusAmount = amount,
+            Reason = ReadString(root, "reason"),
+            CreatedAt = occurredAt,
+        });
+
+        if (isGaming) member.TotalGamingBonusEarned += amount;
+        ApplyBalanceIfNewer(member, gamingAfter, foodAfter, occurredAt);
+    }
+
     private static void ApplyBalanceIfNewer(Member member, decimal gamingAfter, decimal? foodAfter, DateTimeOffset occurredAt)
     {
         if (member.BalanceAsOf is { } asOf && asOf >= occurredAt) return;
