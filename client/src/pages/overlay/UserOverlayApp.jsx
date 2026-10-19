@@ -28,6 +28,8 @@ function postToHost(payload) {
 const OVERLAY_SIZES = {
   bubble: { width: 60, height: 60 },
   panel: { width: 380, height: 620 },
+  // The panel, pinned above the game for the "save your game" warning - see timeWarning.
+  alert: { width: 380, height: 620 },
   // Not a real widget size - the host clips "bubble" mode to a circle matching whatever size it
   // is given (see MainForm.cs's SetFloatingShape), so a 1x1 request becomes a single-pixel dot,
   // not a visible corner button. That is the point during maintenance: nothing on screen should
@@ -75,7 +77,7 @@ function OverlayContent({ isMinimized, setIsMinimized }) {
   const { pcId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessionData, sessionLoading, pcState } = useOverlaySocket();
+  const { sessionData, sessionLoading, pcState, timeWarning } = useOverlaySocket();
   const bubbleDrag = useDragToMoveHost();
   const panelDrag = useDragToMoveHost();
 
@@ -91,6 +93,21 @@ function OverlayContent({ isMinimized, setIsMinimized }) {
   // an active session's bubble, nothing is drawn in it at all (see the render below), since
   // there is no session to reopen and nothing here for a customer to click.
   const isUnderMaintenance = pcState === 'UnderMaintenance';
+
+  // Time running out locks this screen right here, before the server has stopped anything -
+  // and the games were only ever closed on the server's SessionStopped. So the game kept
+  // running under the lock and could come back over it. Tell the host the moment play
+  // actually ends here too; closing twice is harmless.
+  const wasPlayingRef = useRef(false);
+  useEffect(() => {
+    const playing = sessionData?.sessionStatus === 'active' && !isTimeUp;
+    if (wasPlayingRef.current && isTimeUp) {
+      try { window.chrome?.webview?.postMessage('session-ended'); } catch { /* not hosted */ }
+    }
+    wasPlayingRef.current = playing;
+  }, [sessionData?.sessionStatus, isTimeUp]);
+
+  const showTimeAlert = !!timeWarning && !showLockScreen && !isUnderMaintenance;
 
   // Tells the native shell to start/stop recording this PC's own screen while it's under
   // maintenance - see MainForm.cs's HandleOverlayLayoutMessage. Posted on every transition
@@ -164,7 +181,7 @@ function OverlayContent({ isMinimized, setIsMinimized }) {
   // the quick-panel a 284x463 viewport for a layout that needs 380x620, and its header and nav
   // bar filled the window with the session content left nowhere to go. Only the page can
   // measure this ratio, so the page is what reports it.
-  const layoutMode = isUnderMaintenance ? 'bubble' : showLockScreen ? 'full' : isMinimized ? 'bubble' : 'panel';
+  const layoutMode = isUnderMaintenance ? 'bubble' : showLockScreen ? 'full' : showTimeAlert ? 'alert' : isMinimized ? 'bubble' : 'panel';
   useEffect(() => {
     // "bubble" mode itself is what the host needs to hear to position this window like a
     // corner widget rather than a full-screen gate - the size is a separate question, and
@@ -196,7 +213,7 @@ function OverlayContent({ isMinimized, setIsMinimized }) {
   // When minimized, we only show a tiny floating widget that can be expanded - or dragged
   // anywhere on screen. A tap (pointer down+up with no real movement) expands it; anything
   // that actually moves is a drag instead, so the two can share one small target.
-  if (isMinimized) {
+  if (isMinimized && !showTimeAlert) {
     return (
       <>
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -243,6 +260,16 @@ function OverlayContent({ isMinimized, setIsMinimized }) {
           <Minimize2 className="w-5 h-5" />
         </button>
       </div>
+
+      {showTimeAlert && (
+        <div className="shrink-0 bg-neon-red/20 border-b border-neon-red/60 px-5 py-3 text-center">
+          <div className="font-heading font-extrabold uppercase tracking-wider text-neon-red text-lg">
+            {timeWarning} minute{timeWarning > 1 ? 's' : ''} left
+          </div>
+          <div className="text-sm text-text font-bold mt-0.5">Save your game now.</div>
+          <div className="text-xs text-text-2 mt-0.5">All games will close automatically when your time ends.</div>
+        </div>
+      )}
 
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto relative bg-bg/50 scrollbar-thin">

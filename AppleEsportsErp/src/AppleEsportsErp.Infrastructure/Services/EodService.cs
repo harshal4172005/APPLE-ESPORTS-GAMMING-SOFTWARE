@@ -85,7 +85,21 @@ public class EodService : IEodService
             .Where(c => c.BranchId == branchId && ((c.CreatedAt >= dayStart && c.CreatedAt < dayEnd) || (c.ClearedAt >= dayStart && c.ClearedAt < dayEnd)))
             .ToListAsync();
 
-        var pendingCredits = credits.Where(c => c.Status == "pending").Sum(c => c.CreditAmount);
+        // As at the END of this day, never as at today: a credit given here and cleared on a
+        // later day used to drop out of this day's figure the moment it was cleared, so a closed
+        // day's Net Revenue changed afterwards (18 Oct Citylight: 5,020 at close, 5,160 a day
+        // later). And an earlier day's credit cleared today is money in today - counted here,
+        // once, on the day it was paid (owner's rule). Given-and-cleared the same day is
+        // neither: the bill already carries it.
+        bool UnpaidAtDayEnd(DateTimeOffset createdAt, DateTimeOffset? clearedAt) =>
+            createdAt < dayEnd && (clearedAt is null || clearedAt >= dayEnd);
+
+        var pendingCredits = credits
+            .Where(c => c.CreatedAt >= dayStart && UnpaidAtDayEnd(c.CreatedAt, c.ClearedAt))
+            .Sum(c => c.CreditAmount);
+        var earlierCreditsClearedToday = credits
+            .Where(c => c.CreatedAt < dayStart && c.ClearedAt >= dayStart && c.ClearedAt < dayEnd)
+            .Sum(c => c.CreditAmount);
 
         // Member top-ups given on credit - a separate table from CustomerCredit above (see
         // MemberTopUpCredit's own docstring), so deliberately NOT folded into pendingCredits:
@@ -111,7 +125,7 @@ public class EodService : IEodService
         report.Revenue.TotalGamingRevenue = completedBills.Sum(b => b.GamingAmount);
         report.Revenue.TotalFoodRevenue = completedBills.Sum(b => b.FoodAmount);
         report.Revenue.TotalDiscounts = completedBills.Sum(b => b.DiscountAmount);
-        report.Revenue.NetRevenue = completedBills.Sum(b => b.TotalAmount) - pendingCredits;
+        report.Revenue.NetRevenue = completedBills.Sum(b => b.TotalAmount) - pendingCredits + earlierCreditsClearedToday;
 
         // Payment Methods
         report.PaymentMethods.TotalCash = payments.Sum(p => p.CashAmount);
@@ -331,9 +345,11 @@ public class EodService : IEodService
             OriginalBillAmount = c.OriginalBillAmount,
             AmountPaidInitially = c.AmountPaidInitially,
             CreditAmount = c.CreditAmount,
-            Status = c.Status,
+            // As at this day's end, same rule as pendingCredits - the screen's Credit box sums
+            // these, and a closed day must not change when a credit is cleared later.
+            Status = UnpaidAtDayEnd(c.CreatedAt, c.ClearedAt) ? "pending" : "cleared",
             CreatedAt = c.CreatedAt,
-            ClearedAt = c.ClearedAt
+            ClearedAt = c.ClearedAt < dayEnd ? c.ClearedAt : null
         }).ToList();
 
         // Same list, so the screen's own Credit / Credit Cleared rows (which sum straight from
@@ -349,9 +365,9 @@ public class EodService : IEodService
             OriginalBillAmount = c.CreditAmount,
             AmountPaidInitially = 0,
             CreditAmount = c.CreditAmount,
-            Status = c.Status,
+            Status = UnpaidAtDayEnd(c.CreatedAt, c.ClearedAt) ? "pending" : "cleared",
             CreatedAt = c.CreatedAt,
-            ClearedAt = c.ClearedAt
+            ClearedAt = c.ClearedAt < dayEnd ? c.ClearedAt : null
         }));
 
         return report;
