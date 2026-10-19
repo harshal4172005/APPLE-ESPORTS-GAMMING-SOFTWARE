@@ -101,7 +101,7 @@ export default function SessionInfoScreen() {
     if (!sessionData) return { liveGamingCharge: 0, liveTotalBill: 0 };
     // Free during the branch's buffer window, then billed for exact elapsed time —
     // for every session type (fixed package or Pay-As-You-Go), same as the backend.
-    const elapsedSeconds = Math.max(0, Math.floor((now - new Date(sessionData.sessionStart).getTime()) / 1000));
+    const elapsedSeconds = Math.max(0, Math.floor((now - (sessionData.playAnchorMs ?? new Date(sessionData.sessionStart).getTime())) / 1000));
     const elapsedMin = elapsedSeconds / 60;
     const ratePerHour = sessionData.ratePerHour ?? 0;
     const bufferMinutes = sessionData.bufferMinutes ?? 10;
@@ -221,13 +221,13 @@ export default function SessionInfoScreen() {
   let isLowTime = false;
 
   if (isPayAsYouGo) {
-    const elapsedSeconds = Math.max(0, Math.floor((now - new Date(sessionData.sessionStart).getTime()) / 1000));
+    const elapsedSeconds = Math.max(0, Math.floor((now - (sessionData.playAnchorMs ?? new Date(sessionData.sessionStart).getTime())) / 1000));
     displayTime = formatTime(elapsedSeconds);
     timeLabel = 'Elapsed Time';
     isLowTime = false;
   } else {
     // Dynamically calculate remaining time based on start time and planned duration
-    const expectedEndTimeMs = new Date(sessionData.sessionStart).getTime() + (sessionData.plannedDurationMin * 60 * 1000);
+    const expectedEndTimeMs = (sessionData.playAnchorMs ?? new Date(sessionData.sessionStart).getTime()) + (sessionData.plannedDurationMin * 60 * 1000);
     const remainingSeconds = Math.max(0, Math.floor((expectedEndTimeMs - now) / 1000));
     
     displayTime = formatTime(remainingSeconds);

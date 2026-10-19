@@ -77,7 +77,7 @@ function OverlayContent({ isMinimized, setIsMinimized }) {
   const { pcId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { sessionData, sessionLoading, pcState, timeWarning } = useOverlaySocket();
+  const { sessionData, sessionLoading, pcState, timeWarning, isOffline } = useOverlaySocket();
   const bubbleDrag = useDragToMoveHost();
   const panelDrag = useDragToMoveHost();
 
@@ -126,6 +126,15 @@ function OverlayContent({ isMinimized, setIsMinimized }) {
   // mid-session answered no every single time and an update on a gaming PC would go in on top
   // of live play. Set on <body> rather than inside any one screen, so it stays true across
   // every state an active session passes through - bubble, panel and anything added later.
+  // The host remembers which session is on screen, so if the PC is shut down (or loses power)
+  // mid-session it can end exactly that session at that moment - see MainForm's power-off report.
+  useEffect(() => {
+    postToHost({
+      type: 'session-state',
+      sessionId: sessionData?.sessionStatus === 'active' ? sessionData.sessionId : null,
+    });
+  }, [sessionData?.sessionId, sessionData?.sessionStatus]);
+
   useEffect(() => {
     if (sessionData?.sessionStatus !== 'active') {
       document.body.removeAttribute('data-session-active');
@@ -260,6 +269,12 @@ function OverlayContent({ isMinimized, setIsMinimized }) {
           <Minimize2 className="w-5 h-5" />
         </button>
       </div>
+
+      {isOffline && (
+        <div className="shrink-0 bg-neon-orange/15 border-b border-neon-orange/50 px-5 py-2 text-center text-xs font-bold text-neon-orange">
+          Offline — your time is still counted
+        </div>
+      )}
 
       {showTimeAlert && (
         <div className="shrink-0 bg-neon-red/20 border-b border-neon-red/60 px-5 py-3 text-center">

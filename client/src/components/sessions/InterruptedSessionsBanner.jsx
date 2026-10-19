@@ -60,19 +60,21 @@ export default function InterruptedSessionsBanner({ onChanged }) {
 
   if (sessions.length === 0) return null;
 
+  // A popup over the whole counter screen, not a strip that can be scrolled past: after a
+  // power cut every paused session needs an answer, and it stays until each one has one.
   return (
-    <div className="bg-neon-orange-dim border border-neon-orange/50 rounded-lg p-4 mb-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-bg-2 border border-neon-orange/60 rounded-xl p-5 shadow-2xl">
       <div className="flex items-center gap-2 mb-3">
-        <ZapOff className="w-4 h-4 text-neon-orange" />
-        <h3 className="font-heading font-bold text-sm uppercase tracking-wider text-neon-orange">
-          {sessions.length === 1
-            ? '1 session was interrupted'
-            : `${sessions.length} sessions were interrupted`}
+        <ZapOff className="w-5 h-5 text-neon-orange" />
+        <h3 className="font-heading font-bold text-base uppercase tracking-wider text-neon-orange">
+          Power is back — is this person still here?
         </h3>
       </div>
 
       <p className="text-xs text-text-2 mb-3">
-        The clock is stopped on these. Nobody is being charged while they wait.
+        {sessions.length === 1 ? '1 session was' : `${sessions.length} sessions were`} paused by the outage.
+        The clock is stopped on these - nobody is charged while they wait. Answer each one.
       </p>
 
       {error && <p className="text-xs text-accent mb-2">{error}</p>}
@@ -115,22 +117,23 @@ export default function InterruptedSessionsBanner({ onChanged }) {
                   className="btn-primary text-xs flex items-center gap-1.5 disabled:opacity-50"
                 >
                   {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                  Customer is here
+                  Yes, continue
                 </button>
                 <button
                   onClick={() => act(s, 'stop')}
                   disabled={busy}
                   className="btn-secondary text-xs flex items-center gap-1.5 disabled:opacity-50"
-                  title="Bills only the minutes actually played"
+                  title="Ends it and bills only the minutes actually played - a member from the wallet, a walk-in at the counter"
                 >
                   <Square className="w-3.5 h-3.5" />
-                  They left
+                  No, end
                 </button>
               </div>
             </div>
           );
         })}
       </div>
+    </div>
     </div>
   );
 }

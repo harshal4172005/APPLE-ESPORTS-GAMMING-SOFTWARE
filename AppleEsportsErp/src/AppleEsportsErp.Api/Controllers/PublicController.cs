@@ -204,6 +204,10 @@ public class PublicController : ControllerBase
             monitorHz = pc.MonitorHz,
             customerName = session.CustomerName ?? "Guest",
             sessionStart = session.StartTime,
+            // Played time as the server bills it (paused/downtime excluded), so the PC screen
+            // counts on from this instead of from StartTime on its own clock - a PC with a wrong
+            // clock, or a session that was paused, used to show hours nobody played.
+            elapsedSeconds = (int)(elapsedMinutes * 60),
             remainingTime = remainingSeconds.HasValue ? (int)remainingSeconds.Value : (int?)null,
             plannedDurationMin = session.PlannedDurationMin,
             ratePerHour = ratePerHour,
@@ -282,14 +286,69 @@ public class PublicController : ControllerBase
         if (pc == null)
             return Ok(new { success = false, error = "PC not found" });
 
-        if (pc.AppVersion != dto.Version)
+        // Also proof the PC is switched on - this runs every 30 s while AppleEsports.exe is up -
+        // so it clears the "shut down" flag set when it powered off (see ReportPcPoweredOff).
+        if (pc.AppVersion != dto.Version || pc.PoweredOff)
         {
             pc.AppVersion = dto.Version;
+            pc.PoweredOff = false;
             pc.UpdatedAt = DateTimeOffset.UtcNow;
             await _db.SaveChangesAsync();
         }
 
         return Ok(ApiResponse<object>.Ok(new { success = true }));
+    }
+
+    /// <summary>
+    /// The gaming PC was switched off while a session was running - shut down without Logout,
+    /// or found on its next boot to have lost power. Ends that session at the moment the PC
+    /// went off, exactly as Logout would (member: gaming/food wallets, any shortfall left to
+    /// collect; walk-in: bill to the counter), so nobody is charged for time after the PC was
+    /// off and the tile stops showing a running session on a dark machine.
+    ///
+    /// Keyed on the session id the PC itself was showing, not just the PC: it can only ever end
+    /// that one session, never a newer one started after the PC came back.
+    /// </summary>
+    [HttpPost("pcs/{pcId:guid}/powered-off")]
+    public async Task<IActionResult> ReportPcPoweredOff(
+        Guid pcId, [FromBody] PcPoweredOffDto dto,
+        [FromServices] ISessionService sessionService,
+        [FromServices] AppleEsportsErp.Application.Interfaces.IHubNotificationService hubNotifier)
+    {
+        // Sessions live at the branch - Head Office never ends one itself.
+        if (_remote.MustTravel)
+            return Ok(new { success = false, error = "Sessions are ended at the branch, not Head Office." });
+
+        var session = await _db.Sessions.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == dto.SessionId && s.PcId == pcId);
+        if (session == null)
+            return Ok(new { success = false, error = "No such session on this PC." });
+
+        if (session.State is not (SessionState.Active or SessionState.Interrupted))
+            return Ok(ApiResponse<object>.Ok(new { alreadyEnded = true }));
+
+        var now = DateTimeOffset.UtcNow;
+        var endAt = dto.At is { } at && at <= now && at >= session.StartTime ? at : now;
+
+        var sysUsername = $"system_admin_{session.BranchId:N}";
+        var sysOp = await _db.Operators.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.BranchId == session.BranchId && o.Username == sysUsername);
+        if (sysOp == null)
+            return Ok(new { success = false, error = "System operator not found." });
+
+        HttpContext.Items["BranchId"] = session.BranchId.ToString();
+        var result = await sessionService.StopSessionAsync(session.BranchId, sysOp.Id, session.Id, deferPayment: false, asOfOverride: endAt);
+
+        var pc = await _db.Pcs.FirstOrDefaultAsync(p => p.Id == pcId);
+        if (pc != null)
+        {
+            pc.PoweredOff = true;
+            pc.UpdatedAt = now;
+            await _db.SaveChangesAsync();
+            await hubNotifier.BroadcastPcStatusChangeAsync(session.BranchId, pc.Id);
+        }
+
+        return Ok(ApiResponse<object>.Ok(new { ended = true, endedAt = endAt, sessionResult = result }));
     }
 
     [HttpGet("pcs/{pcId}/plans")]
@@ -920,4 +979,12 @@ public class SetMonitorHzDto
 public class ReportPcAppVersionDto
 {
     public string? Version { get; set; }
+}
+
+/// <summary>Sent by a gaming PC's AppleEsports.exe as Windows shuts it down, or on its next boot
+/// for a session it was showing when it lost power. At is when the PC actually went off.</summary>
+public class PcPoweredOffDto
+{
+    public Guid SessionId { get; set; }
+    public DateTimeOffset? At { get; set; }
 }
