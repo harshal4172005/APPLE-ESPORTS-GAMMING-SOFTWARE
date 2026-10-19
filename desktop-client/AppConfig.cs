@@ -203,7 +203,16 @@ public sealed class AppConfig
     public void Save()
     {
         Directory.CreateDirectory(AppDataDirectory);
-        File.WriteAllText(UserConfigPath, JsonSerializer.Serialize(this, JsonOptions));
+        var json = JsonSerializer.Serialize(this, JsonOptions);
+        File.WriteAllText(UserConfigPath, json);
+
+        // Also beside the exe, which is the only config the SYSTEM auto-update task reads
+        // (apply-update.ps1). Without the counter's address there, a gaming PC's updater found
+        // no branch and skipped every pass - gaming PCs never updated. Succeeds only when this
+        // process is elevated (the "Set up this PC now" run straight after install); the
+        // installer fills it from this user copy on the next install otherwise.
+        try { File.WriteAllText(DeploymentConfigPath, json); }
+        catch { /* not elevated - Program Files is admin-only */ }
     }
 
     /// <summary>Normalised base address, guaranteed to have a scheme and no trailing slash.</summary>

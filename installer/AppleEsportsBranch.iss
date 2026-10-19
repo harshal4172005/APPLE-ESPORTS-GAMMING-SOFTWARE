@@ -330,17 +330,55 @@ end;
   This is what makes the shop work with the internet off. The address below is the BRANCH -
   this machine on the counter PC, the counter PC on a gaming PC - never Head Office. Head
   Office is reached only by the branch's own background sync. }
+{ A set-up gaming PC's own config, from whichever Windows profile ran the setup wizard. }
+function FindSetUpUserConfig(): String;
+var
+  FindRec: TFindRec;
+  Candidate: String;
+  Text: AnsiString;
+begin
+  Result := '';
+  if FindFirst(ExpandConstant('{sd}\Users\*'), FindRec) then
+  begin
+    try
+      repeat
+        Candidate := ExpandConstant('{sd}\Users\') + FindRec.Name + '\AppData\Roaming\AppleEsports\config.json';
+        if (Result = '') and (FindRec.Name <> '.') and (FindRec.Name <> '..')
+           and LoadStringFromFile(Candidate, Text) and (Pos('"PcId": "', Text) > 0) then
+          Result := Candidate;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
 procedure WriteClientConfig();
 var
-  Path, Server, Role: String;
+  Path, Server, Role, UserConfig: String;
   Lines: TArrayOfString;
+  Existing: AnsiString;
 begin
   Path := ExpandConstant('{app}\AppleEsports.config.json');
 
   { Never overwritten on an upgrade or repair: it carries the admin PIN and the seat this
     machine was claimed as, and losing those would un-configure a working PC. }
   if FileExists(Path) then
+  begin
+    { Except a gaming PC's empty one. Before 3.1.108 the setup wizard saved the counter's
+      address and this PC's seat to the Windows profile only, so this file kept ServerUrl ""
+      and the SYSTEM update task (apply-update.ps1, which reads only this file) never found
+      the branch - gaming PCs never updated. Filled from that profile copy here, once, by an
+      elevated installer; Program Files stays admin-only so the SYSTEM task still never
+      trusts a file a customer could edit. }
+    if LoadStringFromFile(Path, Existing) and (Pos('"ServerUrl": ""', Existing) > 0) then
+    begin
+      UserConfig := FindSetUpUserConfig();
+      if UserConfig <> '' then
+        FileCopy(UserConfig, Path, False);
+    end;
     Exit;
+  end;
 
   if IsComponentSelected('server') then
   begin
