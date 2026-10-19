@@ -52,6 +52,16 @@ public sealed class MainForm : Form
     /// <summary>The last "overlay-layout" mode applied, so repeated identical messages are a no-op instead of re-snapping the window on every silent refetch.</summary>
     private string? _overlayMode;
     private LockGuard? _lockGuardInstance;
+    private PowerWatch? _powerWatchInstance;
+    private readonly object _powerWatchLock = new();   // used from the UI thread and the update loop
+    private PowerWatch? _powerWatch
+    {
+        get
+        {
+            if (!_config.IsUserPc || _config.PcId is not { } pcId) return null;
+            lock (_powerWatchLock) return _powerWatchInstance ??= new PowerWatch(_config.NormalisedUrl(), pcId);
+        }
+    }
     private LockGuard _lockGuard => _lockGuardInstance ??= new LockGuard(this);
 
     private bool _isFullScreen;
@@ -602,6 +612,13 @@ public sealed class MainForm : Form
             // up every 30 seconds for the update check, and reporting "what am I running" costs
             // nothing extra to ask at the same moment.
             await ReportOwnAppVersionOnceAsync();
+
+            // Same 30 s loop: note the running session is still alive, and deliver any
+            // "this PC went off" report that couldn't be sent at the time.
+            if (_powerWatch is { } watch)
+            {
+                try { await watch.TickAsync(); } catch { /* never take the app down over it */ }
+            }
 
             // Woken early when somebody presses "Check for updates now", so the button is a
             // real check rather than a message saying one will happen eventually.
@@ -1426,6 +1443,13 @@ public sealed class MainForm : Form
                     DragFloatingWindow((int)Math.Round(dxEl.GetDouble()), (int)Math.Round(dyEl.GetDouble()));
                     break;
 
+                case "session-state":
+                    _powerWatch?.SetSession(
+                        root.TryGetProperty("sessionId", out var sidEl)
+                        && sidEl.ValueKind == System.Text.Json.JsonValueKind.String
+                        && Guid.TryParse(sidEl.GetString(), out var sid) ? sid : null);
+                    break;
+
                 case "maintenance-recording" when root.TryGetProperty("active", out var activeEl):
                     if (activeEl.GetBoolean()) StartMaintenanceRecording();
                     else StopMaintenanceRecording();
@@ -1608,6 +1632,11 @@ public sealed class MainForm : Form
     // which is the deliberate exit this is not meant to block.
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        // Windows shutting down or restarting with a session still running (the customer never
+        // pressed Logout): end it now, at this second, before the machine goes dark.
+        if (e.CloseReason == CloseReason.WindowsShutDown)
+            _powerWatch?.OnShutdown();
+
         if (!_allowClose && e.CloseReason is CloseReason.UserClosing)
         {
             e.Cancel = true;

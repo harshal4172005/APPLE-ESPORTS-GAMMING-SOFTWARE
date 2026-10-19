@@ -98,6 +98,8 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       }
 
       const res = await api.get(`/public/session/pc/${pcId}`);
+      lastServerAnswerRef.current = Date.now();
+      setIsOffline(false);
       if (res.data.success && res.data.data) {
         const d = res.data.data;
         setSessionData({
@@ -106,6 +108,12 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
           pcName: d.pcName,
           customerName: d.customerName,
           sessionStart: d.sessionStart,
+          // Where "played time" counts from on THIS PC's clock: now minus what the server says
+          // has actually been played (pauses excluded). Older servers don't send elapsedSeconds,
+          // so fall back to the start time as before.
+          playAnchorMs: d.elapsedSeconds != null
+            ? Date.now() - d.elapsedSeconds * 1000
+            : new Date(d.sessionStart).getTime(),
           remainingTime: d.remainingTime,
           plannedDurationMin: d.plannedDurationMin,
           ratePerHour: d.ratePerHour ?? pcRatePerHour,
@@ -126,6 +134,9 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
         setSessionData(null);
       }
     } catch (err) {
+      // Server slow, busy or unreachable: keep the current session and keep counting - a real
+      // session is never stopped from here. After 30 s without an answer, say so on screen.
+      if (Date.now() - lastServerAnswerRef.current > 30000) setIsOffline(true);
       console.error('[Overlay] Failed to fetch session:', err);
     } finally {
       if (!silent) setSessionLoading(false);
@@ -202,6 +213,10 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
   // UserOverlayApp pops the panel up on top of the game while this is set.
   const [timeWarning, setTimeWarning] = useState(null);
   const timeWarningTimerRef = useRef(null);
+
+  // True after 30 s without an answer from the branch server.
+  const [isOffline, setIsOffline] = useState(false);
+  const lastServerAnswerRef = useRef(Date.now());
 
   // Announces the reminder out loud, mirroring the time-remaining alerts.
   const playBalanceAlert = (remaining, minutes) => {
@@ -288,7 +303,7 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
         // buffer window, then billed for exact elapsed time. Same formula the backend uses.
         let nextGamingCharges = prev.gamingCharges;
         if (prev.sessionStart) {
-          const elapsedMs = Date.now() - new Date(prev.sessionStart).getTime();
+          const elapsedMs = Date.now() - (prev.playAnchorMs ?? new Date(prev.sessionStart).getTime());
           const elapsedMin = elapsedMs / (1000 * 60);
           const bufferMinutes = prev.bufferMinutes ?? 10;
           nextGamingCharges = elapsedMin <= bufferMinutes ? 0 : (elapsedMin / 60) * (prev.ratePerHour || 0);
@@ -323,7 +338,7 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
             ? affordableMinutes(prev.ratePerHour, prev.bufferMinutes ?? 10, prev.gamingBalance)
             : Infinity;
           const elapsedMinutes = prev.sessionStart
-            ? (Date.now() - new Date(prev.sessionStart).getTime()) / (1000 * 60)
+            ? (Date.now() - (prev.playAnchorMs ?? new Date(prev.sessionStart).getTime())) / (1000 * 60)
             : 0;
 
           if (elapsedMinutes >= stopAtMinutes && !autoCheckoutRef.current.triggered) {
@@ -765,6 +780,7 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       lowBalanceWarning,
       dismissLowBalanceWarning: () => setLowBalanceWarning(null),
       timeWarning,
+      isOffline,
     }}>
       {children}
     </OverlaySocketContext.Provider>
