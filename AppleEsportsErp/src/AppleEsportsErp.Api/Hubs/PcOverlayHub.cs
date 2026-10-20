@@ -55,8 +55,13 @@ public class PcOverlayHub : Hub
         // from an operator's command, someone pressing the power button themselves, or an
         // unplanned reboot. This is the one place that is true for every PC regardless of how it
         // went down, so it is the one place this flag gets cleared. See Pc.PoweredOff.
+        await ClearPoweredOffAsync(pcId, TimeSpan.Zero);
+    }
+
+    private async Task ClearPoweredOffAsync(string pcId, TimeSpan markedAtLeast)
+    {
         var pc = await GetPcAsync(pcId);
-        if (pc != null && pc.PoweredOff)
+        if (pc != null && pc.PoweredOff && pc.UpdatedAt <= DateTimeOffset.UtcNow - markedAtLeast)
         {
             pc.PoweredOff = false;
             pc.UpdatedAt = DateTimeOffset.UtcNow;
@@ -68,6 +73,14 @@ public class PcOverlayHub : Hub
 
     public async Task Heartbeat(HeartbeatPayload payload)
     {
+        // Every 30 s from a PC whose screen is up - proof it is on. Connecting alone was not
+        // enough: a PC already connected when it got marked off (Shutdown All, or last night's
+        // shutdown arriving late) stayed "OFF - BILLING" all day with a customer playing on it.
+        // Only marks 2+ minutes old: a PC still powering down after Shutdown sends one last
+        // heartbeat, and that one must not undo the mark. (UpdatedAt is when it was marked.)
+        await ClearPoweredOffAsync(payload.PcId, TimeSpan.FromMinutes(2));
+
+
         // Broadcast to operators that this PC is active
         _logger.LogDebug("Heartbeat received from {PcId}", payload.PcId);
         await _pcStatusHub.Clients.All.SendAsync("PcStatusUpdated", new
