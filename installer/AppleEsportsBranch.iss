@@ -365,7 +365,7 @@ begin
     machine was claimed as, and losing those would un-configure a working PC. }
   if FileExists(Path) then
   begin
-    { Except a gaming PC's empty one. Before 3.1.110 the setup wizard saved the counter's
+    { Except a gaming PC's empty one. Before 3.1.108 the setup wizard saved the counter's
       address and this PC's seat to the Windows profile only, so this file kept ServerUrl ""
       and the SYSTEM update task (apply-update.ps1, which reads only this file) never found
       the branch - gaming PCs never updated. Filled from that profile copy here, once, by an
