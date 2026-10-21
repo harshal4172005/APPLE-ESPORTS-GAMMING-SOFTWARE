@@ -222,6 +222,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.Property<Guid?>("ShiftId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ShortageOperatorId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -353,6 +356,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
 
                     b.Property<string>("Address")
                         .HasColumnType("text");
+
+                    b.Property<bool>("ChargeMissingStock")
+                        .HasColumnType("boolean");
 
                     b.Property<TimeOnly>("ClosingTime")
                         .ValueGeneratedOnAdd()
@@ -2908,6 +2914,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                         .HasColumnType("character varying(100)");
 
                     b.Property<Guid?>("ShiftId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ShortageBillId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");

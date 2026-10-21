@@ -458,6 +458,9 @@ public class BranchHeartbeatService : BackgroundService
 
             // Retired: the shared fridge's count now lives at Head Office (SharedStockGate).
             // Applying a leftover relay here would move that count a second time.
+            case BranchCommands.SetChargeMissingStock:
+                return await RunSetChargeMissingStockAsync(scoped, command.Payload, ct);
+
             case BranchCommands.RelaySharedStockDelta:
                 return (true, "Ignored - the shared fridge count is kept at Head Office now.");
 
@@ -882,6 +885,20 @@ public class BranchHeartbeatService : BackgroundService
         {
             return (false, ex.GetBaseException().Message);
         }
+    }
+
+    private static async Task<(bool, string)> RunSetChargeMissingStockAsync(
+        IServiceProvider scoped, string payload, CancellationToken ct)
+    {
+        bool enabled;
+        try { enabled = JsonDocument.Parse(payload).RootElement.GetProperty("enabled").GetBoolean(); }
+        catch { return (false, "The missing-stock switch arrived without an on/off value."); }
+
+        var db = scoped.GetRequiredService<AppDbContext>();
+        await db.Branches.ExecuteUpdateAsync(s => s.SetProperty(b => b.ChargeMissingStock, enabled), ct);
+        return (true, enabled
+            ? "Missing stock is now charged to operators at this branch."
+            : "Missing stock charging is now off at this branch.");
     }
 
     private static async Task<(bool, string)> RunDeleteInventoryItemAsync(

@@ -23,6 +23,9 @@ public class StockCount
 
     public DateTimeOffset CountedAt { get; set; }
 
+    /// <summary>The bill this count raised for missing items, if any (StockShortageBilling).</summary>
+    public Guid? ShortageBillId { get; set; }
+
     /// <summary>JSON: [{ inventoryId, itemName, system, counted }].</summary>
     public string Lines { get; set; } = "[]";
 }

@@ -310,4 +310,8 @@ public static class BranchCommands
     /// left.
     /// </summary>
     public const string RelaySharedStockDelta = "relay_shared_stock_delta";
+
+    /// <summary>Super Admin's per-branch switch for charging operators for missing stock
+    /// (Branch.ChargeMissingStock), carried to the branch that actually uses it.</summary>
+    public const string SetChargeMissingStock = "set_charge_missing_stock";
 }

@@ -48,6 +48,15 @@ public class CashDeskService : ICashDeskService
             .FirstOrDefaultAsync(r => r.BranchId == branchId && r.Status == CashRegisterStatus.Open)
             ?? throw new NotFoundException("No open cash register found to verify.");
 
+        // Only where Super Admin has switched on charging for missing stock: the bill for it is
+        // settled (paid, or put on credit) before the drawer is counted, so its cash is in the
+        // count. Off, this check does not exist.
+        var chargeMissing = await _unitOfWork.Repository<Branch>().Query()
+            .Where(b => b.Id == branchId).Select(b => b.ChargeMissingStock).FirstOrDefaultAsync();
+        if (chargeMissing && await _unitOfWork.Repository<Bill>().Query().AnyAsync(b =>
+                b.BranchId == branchId && b.ShortageOperatorId == register.OperatorId && b.Status == BillStatus.Pending))
+            throw new AppException("Pay the missing stock bill first (cash, online, split or credit), then lock the register.");
+
         register.Status = CashRegisterStatus.Verifying;
         _unitOfWork.Repository<CashRegister>().Update(register);
         

@@ -13,6 +13,9 @@ public class EodReportDto
     /// <summary>Whether what was billed agrees with what was taken. See EodReconciliationDto.</summary>
     public EodReconciliationDto Reconciliation { get; set; } = new();
 
+    /// <summary>Missing-stock bills raised or paid today, whoever they charge.</summary>
+    public List<AppleEsportsErp.Application.DTOs.Reports.StockShortageDto> StockShortages { get; set; } = new();
+
     public ShiftSummaryDto Shifts { get; set; } = new();
     public OperationalStatsDto Operations { get; set; } = new();
     public List<EodCreditLogDto> CreditLogs { get; set; } = new();
@@ -38,6 +41,12 @@ public class RevenueSummaryDto
     public decimal TotalFoodRevenue { get; set; }
     public decimal TotalDiscounts { get; set; }
     public decimal NetRevenue { get; set; }
+
+    /// <summary>
+    /// Part of Food Revenue: paid today by operators for stock their counts found missing
+    /// (StockShortageBilling) - the money for cans that left the shelf without a sale.
+    /// </summary>
+    public decimal StockShortageRecovered { get; set; }
 }
 
 public class CashSummaryDto

@@ -113,6 +113,12 @@ export const getAuditLogs = async () => {
 };
 
 // --- Activation / Permanent Deletion ---
+// Super Admin's per-branch switch: charge operators for stock their shift counts find missing.
+export const setChargeMissingStock = async (id, enabled) => {
+  const response = await api.put(`/branches/${id}/charge-missing-stock`, { enabled });
+  return response.data;
+};
+
 export const activateBranch = async (id) => {
   const response = await api.post(`/branches/${id}/activate`);
   return response.data;

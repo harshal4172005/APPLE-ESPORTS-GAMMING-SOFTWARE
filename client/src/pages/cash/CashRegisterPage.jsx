@@ -7,6 +7,7 @@ import api from '../../config/api';
 import { getCashReconciliationReport } from '../../api/reports.api';
 import PageHeader from '../../components/layout/PageHeader';
 import DenominationCounter from '../../components/cash/DenominationCounter';
+import { MissingStockCount, MissingStockPay } from '../../components/cash/MissingStockSteps';
 import { generateIdempotencyKey } from '../../utils/idempotency';
 import { format } from 'date-fns';
 import { createReport, addTable, save } from '../../utils/pdfReport';
@@ -23,7 +24,7 @@ const readStoredDate = (key) => {
 };
 
 // A register's shift-start and shift-end stock counts, under its note breakdown: who counted,
-// when, and every item with what the system said - short or extra in colour, like cash.
+// when, and every item with what the system said - missing or extra in colour, like cash.
 function StockCounts({ counts }) {
   if (!counts?.length) {
     return <div className="mt-2 text-text-3 italic font-sans">No stock count recorded for this shift.</div>;
@@ -42,15 +43,34 @@ function StockCounts({ counts }) {
               {l.itemName} <span className="text-text font-bold">{l.counted}</span>
               {diff !== 0 && (
                 <span className={diff < 0 ? 'text-neon-red font-bold' : 'text-neon-orange font-bold'}>
-                  {' '}(system {l.system}, {diff < 0 ? `${-diff} short` : `${diff} extra`})
+                  {' '}(system {l.system}, {diff < 0 ? `${-diff} missing` : `${diff} extra`})
                 </span>
               )}
             </span>
           );
         })}
       </div>
+      {c.shortage && <MissingStockLine s={c.shortage} />}
     </div>
   ));
+}
+
+// The missing-stock bill a count raised, as it was settled. Figures are never rewritten: a
+// credit cleared on a later day only adds that note here - the money counts on that day.
+function MissingStockLine({ s }) {
+  const rs = (n) => `₹${Number(n).toFixed(2)}`;
+  let how;
+  if (!s.paid) how = `not paid yet (bill ${s.billNumber})`;
+  else if (s.paidWith === 'Credit') {
+    how = `${s.cashAmount > 0 ? `Cash ${rs(s.cashAmount)} + ` : ''}Credit ${rs(s.creditAmount)}`
+      + (s.creditCleared ? ` - credit cleared ${s.creditClearedAt ? format(new Date(s.creditClearedAt), 'MMM d') : ''}` : ' - pending');
+  } else if (s.paidWith === 'Split') how = `Cash ${rs(s.cashAmount)} + Online ${rs(s.onlineAmount)}`;
+  else how = `${s.paidWith} ${rs(s.amount)}`;
+  return (
+    <div className={`mt-1 text-xs font-bold font-sans ${s.paid ? 'text-neon-green' : 'text-neon-red'}`}>
+      Missing stock paid by {s.chargedTo}: {rs(s.amount)} ({s.items}) - {how}
+    </div>
+  );
 }
 
 export default function CashRegisterPage() {
@@ -88,6 +108,12 @@ export default function CashRegisterPage() {
   const [stockBusy, setStockBusy] = useState(false);
   const [stockError, setStockError] = useState('');
   const [isCancelling, setIsCancelling] = useState(false);
+
+  // Super Admin's per-branch switch (Branch.ChargeMissingStock). On: stock is counted first,
+  // anything missing is billed to this operator and paid, and only then is the register
+  // locked. Off - or not known yet, or not answerable - is exactly the old screen.
+  const [missingStatus, setMissingStatus] = useState(null);
+  const missingEnabled = !!missingStatus?.enabled;
 
   // Whether the branch's last close was a genuine day close (so "No Register Open" can say so
   // plainly) and, for Admin/Super Admin, a way to undo it if it was a mistake.
@@ -290,9 +316,24 @@ export default function CashRegisterPage() {
     }
   };
 
-  // Loaded once the cash is counted, which is when this screen reaches the stock step.
+  const fetchMissingStatus = useCallback(async () => {
+    if (!register?.id || isTrueSuperAdmin) return;
+    try {
+      const { data } = await api.get('/inventory/missing-stock', { params: { cashRegisterId: register.id } });
+      setMissingStatus(data?.data || { enabled: false, closingCountDone: false, pending: [] });
+    } catch {
+      setMissingStatus({ enabled: false, closingCountDone: false, pending: [] });
+    }
+  }, [register?.id, isTrueSuperAdmin]);
+
+  useEffect(() => { fetchMissingStatus(); }, [fetchMissingStatus]);
+
+  // Loaded once the cash is counted, which is when this screen reaches the stock step - or,
+  // where missing stock is charged, at the start, because that count comes first.
   useEffect(() => {
-    if (register?.status !== 'Verified' || isTrueSuperAdmin || inventory !== null) return;
+    const wantsStock = register?.status === 'Verified'
+      || (register?.status === 'Open' && missingEnabled && !missingStatus?.closingCountDone);
+    if (!wantsStock || isTrueSuperAdmin || inventory !== null) return;
     let alive = true;
     (async () => {
       try {
@@ -308,7 +349,7 @@ export default function CashRegisterPage() {
       }
     })();
     return () => { alive = false; };
-  }, [register?.status, isTrueSuperAdmin, inventory]);
+  }, [register?.status, isTrueSuperAdmin, inventory, missingEnabled, missingStatus?.closingCountDone]);
 
   // The whole count is saved against this register - every item, including the ones that
   // matched - so Super Admin sees who counted what under the note breakdown in the history.
@@ -672,8 +713,19 @@ export default function CashRegisterPage() {
         </div>
       )}
 
+      {/* Missing stock charged at this branch: count first, then pay, then lock (below). */}
+      {register.status === 'Open' && missingEnabled && !missingStatus.closingCountDone && (
+        inventory === null
+          ? <div className="flex-1 flex items-center justify-center text-text-3 text-sm">{stockError || 'Loading the stock list...'}</div>
+          : <MissingStockCount inventory={inventory} registerId={register.id} onDone={fetchMissingStatus} />
+      )}
+      {register.status === 'Open' && missingEnabled && missingStatus.closingCountDone && missingStatus.pending.length > 0 && (
+        <MissingStockPay bills={missingStatus.pending} onPaid={fetchMissingStatus} />
+      )}
+
       {/* STEP 1: Lock Register */}
-      {register.status === 'Open' && (
+      {register.status === 'Open' && missingStatus !== null
+        && (!missingEnabled || (missingStatus.closingCountDone && missingStatus.pending.length === 0)) && (
         <div className="flex-1 flex flex-col items-center justify-center border border-border bg-bg-2 rounded-xl p-8 text-center">
           <div className="w-20 h-20 bg-neon-orange/10 text-neon-orange rounded-full flex items-center justify-center mb-6">
             <Lock className="w-10 h-10" />
@@ -742,6 +794,7 @@ export default function CashRegisterPage() {
               case has already returned its own read-only view above, so it can only ever be
               false here. */}
           <div className="w-full max-w-md mb-6 space-y-3 text-left">
+              {!missingEnabled && (
               <div className="bg-bg-3 border border-border rounded-xl p-4">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-text text-sm font-bold">Check the stock</span>
@@ -809,6 +862,7 @@ export default function CashRegisterPage() {
                   </button>
                 )}
               </div>
+              )}
 
               <label className="flex items-start gap-3 bg-bg-3 border border-border rounded-xl p-4 cursor-pointer hover:border-neon-red/40 transition-colors">
                 <input
@@ -893,7 +947,7 @@ export default function CashRegisterPage() {
             onClick={handleCloseShift}
             disabled={
               isClosing ||
-              !stockChecked ||
+              (!missingEnabled && !stockChecked) ||
               (closesTradingDay && (coverAmount === '' || nextDayFloat === '')) ||
               (dayCloseNeedsReason && !nextDayFloatReason.trim())
             }

@@ -635,6 +635,42 @@ export default function EodDashboardPage() {
         );
       })()}
 
+      {/* Missing stock billed to operators - already inside Food and Cash/Online/Credit above,
+          listed again so the owner sees who paid for what was missing, and how. */}
+      {report?.stockShortages?.length > 0 && (
+        <div className="card bg-bg-2 border border-neon-red/30 p-6 rounded-xl">
+          <div className="flex items-baseline justify-between mb-4">
+            <h2 className="font-heading font-extrabold text-sm uppercase tracking-wider text-text">Paid by operators for missing stock</h2>
+            <span className="font-mono font-bold text-neon-red">₹{Number(report.revenue.stockShortageRecovered || 0).toFixed(2)}</span>
+          </div>
+          <table className="w-full text-xs">
+            <thead className="text-text-3 text-[10px] uppercase tracking-wider">
+              <tr>
+                <th className="text-left font-normal pb-2">Operator</th>
+                <th className="text-left font-normal pb-2">Missing</th>
+                <th className="text-right font-normal pb-2">Amount</th>
+                <th className="text-left font-normal pb-2 pl-4">How paid</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.stockShortages.map(s => (
+                <tr key={s.billId} className="border-t border-border/60">
+                  <td className="py-2 text-text font-bold">{s.chargedTo}</td>
+                  <td className="py-2 text-text-2">{s.items}</td>
+                  <td className="py-2 text-right font-mono">₹{Number(s.amount).toFixed(2)}</td>
+                  <td className={`py-2 pl-4 ${s.paid ? 'text-text-2' : 'text-neon-red font-bold'}`}>
+                    {!s.paid ? 'Not paid yet'
+                      : s.paidWith === 'Credit' ? `${s.cashAmount > 0 ? `Cash ₹${Number(s.cashAmount).toFixed(2)} + ` : ''}Credit ₹${Number(s.creditAmount).toFixed(2)}${s.creditCleared ? ' (cleared)' : ' (pending)'}`
+                      : s.paidWith === 'Split' ? `Cash ₹${Number(s.cashAmount).toFixed(2)} + Online ₹${Number(s.onlineAmount).toFixed(2)}`
+                      : s.paidWith}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* PC-Wise Personalised Billing Section */}
       <div className="card bg-bg-2 border border-border p-6 rounded-xl">
         <h2 className="font-heading font-extrabold text-sm uppercase tracking-wider text-text flex items-center gap-2 mb-6">

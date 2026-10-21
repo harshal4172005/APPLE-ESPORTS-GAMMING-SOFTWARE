@@ -21,6 +21,15 @@ public class Branch
     /// default; Admin/Super Admin can change it per branch in Settings.</summary>
     public decimal DefaultOpeningFloat { get; set; } = 1000m;
 
+    /// <summary>
+    /// Super Admin's per-branch switch: when on, stock a shift count finds missing is billed to
+    /// the operator responsible (StockShortageBilling) and the shift-end screen counts stock
+    /// and settles that bill before the register is locked. Off (the default) is exactly the
+    /// behaviour from before this existed. Set at Head Office and sent to the branch as a
+    /// command (BranchCommands.SetChargeMissingStock), so the branch keeps it with no internet.
+    /// </summary>
+    public bool ChargeMissingStock { get; set; }
+
     /// <summary>Null (the default) means this branch's food/snacks are fully independent.
     /// Set to share a menu and stock count with every other branch pointing at the same
     /// FoodGroup — see FoodGroup.cs.</summary>
