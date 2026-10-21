@@ -51,6 +51,9 @@ public class ReportsService : IReportsService
             .ToListAsync();
         var readLines = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
+        var shortageBillIds = counts.Where(c => c.ShortageBillId != null).Select(c => c.ShortageBillId!.Value).ToList();
+        var shortages = await StockShortagesAsync(_unitOfWork, b => shortageBillIds.Contains(b.Id));
+
         foreach (var r in registers)
         {
             var denom = r.DenominationCounts.OrderByDescending(d => d.CreatedAt).FirstOrDefault();
@@ -89,11 +92,57 @@ public class ReportsService : IReportsService
                         OperatorName = c.OperatorName,
                         CountedAt = c.CountedAt,
                         Lines = System.Text.Json.JsonSerializer.Deserialize<List<StockCountLineDto>>(c.Lines, readLines) ?? new(),
+                        Shortage = shortages.FirstOrDefault(s => s.BillId == c.ShortageBillId),
                     })
                     .ToList(),
             });
         }
 
         return reports;
+    }
+
+    /// <summary>Missing-stock bills (StockShortageBilling) matching <paramref name="which"/>, for
+    /// the Cash Register history and EOD.</summary>
+    public static async Task<List<StockShortageDto>> StockShortagesAsync(
+        IUnitOfWork unitOfWork, System.Linq.Expressions.Expression<Func<Bill, bool>> which)
+    {
+        var bills = await unitOfWork.Repository<Bill>().Query()
+            .Include(b => b.Operator)
+            .Include(b => b.Items)
+            .Where(b => b.ShortageOperatorId != null)
+            .Where(which)
+            .OrderBy(b => b.CreatedAt)
+            .ToListAsync();
+
+        var billIds = bills.Select(b => b.Id).ToList();
+        var credits = await unitOfWork.Repository<CustomerCredit>().Query()
+            .Where(c => billIds.Contains(c.BillId))
+            .ToListAsync();
+
+        return bills.Select(b =>
+        {
+            var credit = credits.FirstOrDefault(c => c.BillId == b.Id);
+            var paid = b.Status == BillStatus.Completed;
+            return new StockShortageDto
+            {
+                BillId = b.Id,
+                BillNumber = b.BillNumber,
+                ChargedTo = b.Operator?.FullName ?? b.CustomerName ?? "Unknown",
+                Amount = b.TotalAmount,
+                Paid = paid,
+                PaidWith = !paid ? null
+                    : credit is not null ? "Credit"
+                    : b.CashAmount > 0 && b.OnlineAmount > 0 ? "Split"
+                    : b.OnlineAmount > 0 ? "Online" : "Cash",
+                PaidAt = b.CompletedAt,
+                CashAmount = paid ? b.CashAmount : 0,
+                OnlineAmount = paid ? b.OnlineAmount : 0,
+                CreditAmount = credit?.CreditAmount ?? 0,
+                CreditCleared = credit?.Status == "cleared",
+                CreditClearedAt = credit?.ClearedAt,
+                CreatedAt = b.CreatedAt,
+                Items = string.Join(", ", b.Items.Select(i => $"{i.Quantity} × {i.ItemName.Replace(" - missing in stock count", "")}")),
+            };
+        }).ToList();
     }
 }

@@ -199,6 +199,10 @@ public class BillingService : IBillingService
         if (bill.Status == BillStatus.Completed)
             throw new AppException("Cannot apply discount to a completed bill.");
 
+        // Owner's rule: missing stock is paid in full by the operator - no one can waive it.
+        if (bill.ShortageOperatorId.HasValue)
+            throw new AppException("A missing-stock bill is paid in full and cannot be discounted.");
+
         // The sticker price — what the customer would pay with NO discount — rounded to the
         // nearest ₹10 first, on its own, before the discount ever enters the arithmetic.
         //
@@ -907,6 +911,11 @@ public class BillingService : IBillingService
 
             var itemToRemove = bill.Items.FirstOrDefault(i => i.Id == billItemId)
                 ?? throw new NotFoundException("Bill item not found.");
+
+            // The system raised it for stock found missing (StockShortageBilling); the operator it
+            // charges must not be able to delete it, and nobody can waive it (see ApplyDiscountAsync).
+            if (bill.ShortageOperatorId.HasValue)
+                throw new AppException("This is a missing-stock bill. Its items cannot be removed.");
 
             if (itemToRemove.ItemType.ToLower() == "gaming")
                 throw new AppException("Cannot manually remove gaming items.");

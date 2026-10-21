@@ -40,6 +40,33 @@ public class StockCountDto
     public string OperatorName { get; set; } = string.Empty;
     public DateTimeOffset CountedAt { get; set; }
     public List<StockCountLineDto> Lines { get; set; } = new();
+
+    /// <summary>The bill this count raised for missing items, if any.</summary>
+    public StockShortageDto? Shortage { get; set; }
+}
+
+/// <summary>A missing-stock bill: who it charges, how much, and whether/how it was paid.</summary>
+public class StockShortageDto
+{
+    public Guid BillId { get; set; }
+    public string BillNumber { get; set; } = string.Empty;
+    public string ChargedTo { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    /// <summary>Settled at the counter - paid, or put on credit. False = still waiting to be paid.</summary>
+    public bool Paid { get; set; }
+    public string? PaidWith { get; set; }       // Cash, Online, Split, Credit
+    public DateTimeOffset? PaidAt { get; set; }
+
+    // How it was settled, as it was settled - never rewritten later.
+    public decimal CashAmount { get; set; }
+    public decimal OnlineAmount { get; set; }
+    public decimal CreditAmount { get; set; }
+
+    /// <summary>Status only: a credit cleared on a later day. The money counts on that day.</summary>
+    public bool CreditCleared { get; set; }
+    public DateTimeOffset? CreditClearedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public string Items { get; set; } = string.Empty;
 }
 
 public class StockCountLineDto

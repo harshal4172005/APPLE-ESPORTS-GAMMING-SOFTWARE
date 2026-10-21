@@ -727,6 +727,57 @@ public class InventoryController : ControllerBase
 
     public record UpdateStockRequest(int CurrentStock);
 
+    /// <summary>
+    /// What the shift-end screen needs before it lets the register be locked: whether this
+    /// branch charges for missing stock at all, whether this register's stock has been counted
+    /// yet, and every missing-stock bill still unpaid by the operator asking.
+    /// </summary>
+    [HttpGet("missing-stock")]
+    [Authorize(Roles = Roles.SuperAdmin + "," + Roles.Admin + "," + Roles.Operator)]
+    public async Task<IActionResult> MissingStockStatus([FromQuery] Guid? cashRegisterId)
+    {
+        var userId = CurrentUserId();
+        var registerQuery = _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.CashRegister>().Query();
+        var register = cashRegisterId is { } rid
+            ? await registerQuery.Where(r => r.Id == rid).Select(r => new { r.Id, r.BranchId, r.OperatorId }).FirstOrDefaultAsync()
+            : null;
+        var branchId = register?.BranchId
+            ?? (Guid.TryParse(HttpContext.Items["BranchId"]?.ToString(), out var b) ? b : Guid.Empty);
+        var operatorId = register?.OperatorId ?? userId;
+
+        var enabled = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Branch>().Query()
+            .Where(x => x.Id == branchId).Select(x => x.ChargeMissingStock).FirstOrDefaultAsync();
+
+        var counted = register is not null && await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.StockCount>().Query()
+            .AnyAsync(c => c.CashRegisterId == register.Id && c.Kind == "closing");
+
+        var pending = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Bill>().Query()
+            .Include(x => x.Items)
+            .Where(x => x.BranchId == branchId && x.ShortageOperatorId == operatorId
+                && x.Status == AppleEsportsErp.Domain.Enums.BillStatus.Pending)
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync();
+
+        return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new
+        {
+            enabled,
+            closingCountDone = counted,
+            pending = pending.Select(x => new
+            {
+                x.Id,
+                x.BillNumber,
+                x.BranchId,
+                x.CustomerName,
+                x.TotalAmount,
+                x.FoodAmount,
+                x.GamingAmount,
+                x.DiscountAmount,
+                x.CreatedAt,
+                items = x.Items.Select(i => new { i.ItemName, i.Quantity, i.UnitPrice, i.TotalPrice }),
+            }),
+        }));
+    }
+
     public record StockCountLineRequest(Guid InventoryId, int Counted);
     public record StockCountRequest(string Kind, Guid? CashRegisterId, List<StockCountLineRequest> Counts);
 
@@ -770,11 +821,13 @@ public class InventoryController : ControllerBase
             .OrderByDescending(r => r.OpenedAt).Select(r => (Guid?)r.Id).FirstOrDefaultAsync();
 
         var lines = new List<object>();
+        var missing = new List<(AppleEsportsErp.Domain.Entities.InventoryItem Item, int Missing)>();
         foreach (var count in request.Counts)
         {
             var item = items.FirstOrDefault(i => i.Id == count.InventoryId);
             if (item is null) continue;
             lines.Add(new { inventoryId = item.Id, itemName = item.ItemName, system = item.CurrentStock, counted = count.Counted });
+            if (count.Counted < item.CurrentStock) missing.Add((item, item.CurrentStock - count.Counted));
             if (count.Counted == item.CurrentStock) continue;
 
             await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryLog>().AddAsync(new AppleEsportsErp.Domain.Entities.InventoryLog
@@ -796,6 +849,31 @@ public class InventoryController : ControllerBase
             _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryItem>().Update(item);
         }
 
+        // Anything missing is billed to the operator responsible, automatically - see
+        // StockShortageBilling. Shift end: whoever's register this is. Shift start: whoever
+        // closed the register before, since it went missing in their custody.
+        var opening = request.Kind == "opening";
+        var registers = _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.CashRegister>().Query();
+        var responsible = opening
+            ? await registers.Where(r => r.BranchId == branchId && r.ClosedAt != null && r.Id != registerId)
+                .OrderByDescending(r => r.ClosedAt).Select(r => new { r.OperatorId, ShiftId = (Guid?)r.ShiftId }).FirstOrDefaultAsync()
+            : await registers.Where(r => r.Id == registerId)
+                .Select(r => new { r.OperatorId, ShiftId = (Guid?)r.ShiftId }).FirstOrDefaultAsync()
+              ?? new { OperatorId = userId, ShiftId = shiftId };
+        var responsibleName = responsible is null ? null
+            : await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Operator>().Query()
+                .Where(o => o.Id == responsible.OperatorId).Select(o => o.FullName).FirstOrDefaultAsync();
+
+        // Only where Super Admin has switched it on for this branch (Branch.ChargeMissingStock).
+        var chargeMissing = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Branch>().Query()
+            .Where(b => b.Id == branchId).Select(b => b.ChargeMissingStock).FirstOrDefaultAsync();
+
+        var shortageBill = !chargeMissing || responsibleName is null ? null
+            : AppleEsportsErp.Infrastructure.Services.StockShortageBilling.Build(
+                branchId, responsible!.OperatorId, responsibleName, responsible.ShiftId, missing, now);
+        if (shortageBill is not null)
+            await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Bill>().AddAsync(shortageBill);
+
         await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.StockCount>().AddAsync(new AppleEsportsErp.Domain.Entities.StockCount
         {
             Id = Guid.NewGuid(),
@@ -804,13 +882,24 @@ public class InventoryController : ControllerBase
             ShiftId = shiftId,
             OperatorId = userId == Guid.Empty ? null : userId,
             OperatorName = name,
-            Kind = request.Kind == "opening" ? "opening" : "closing",
+            Kind = opening ? "opening" : "closing",
             CountedAt = now,
+            ShortageBillId = shortageBill?.Id,
             Lines = System.Text.Json.JsonSerializer.Serialize(lines),
         });
         await _unitOfWork.SaveChangesAsync();
 
-        return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new { lines }));
+        return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new
+        {
+            lines,
+            shortage = shortageBill is null ? null : new
+            {
+                shortageBill.BillNumber,
+                amount = shortageBill.TotalAmount,
+                chargedTo = responsibleName,
+                items = shortageBill.Items.Select(i => new { i.ItemName, i.Quantity, i.TotalPrice }),
+            },
+        }));
     }
 }
 
@@ -907,7 +996,8 @@ public class BranchesController : ControllerBase
             ConfiguredReservationDurations = b.ConfiguredReservationDurations,
             DefaultOpeningFloat = b.DefaultOpeningFloat,
             FoodGroupId = b.FoodGroupId,
-            FoodGroupName = b.FoodGroup?.Name
+            FoodGroupName = b.FoodGroup?.Name,
+            ChargeMissingStock = b.ChargeMissingStock,
         });
 
         return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(dtos));
@@ -971,6 +1061,36 @@ public class BranchesController : ControllerBase
         await _unitOfWork.SaveChangesAsync();
 
         return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new { message = "Branch deactivated successfully" }));
+    }
+
+    public record ChargeMissingStockRequest(bool Enabled);
+
+    /// <summary>
+    /// Super Admin's per-branch switch for charging operators for missing stock (see
+    /// Branch.ChargeMissingStock). Saved here and, from Head Office, sent to the branch as a
+    /// queued command - the branch's own copy is the one its screens and counts actually use.
+    /// </summary>
+    [HttpPut("{id}/charge-missing-stock")]
+    [Authorize(Roles = AppleEsportsErp.Application.Constants.Roles.SuperAdmin)]
+    public async Task<IActionResult> SetChargeMissingStock(Guid id, [FromBody] ChargeMissingStockRequest request,
+        [FromServices] AppleEsportsErp.Api.Services.IRemoteBranchControl remote, CancellationToken ct)
+    {
+        var branch = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Branch>().Query().FirstOrDefaultAsync(b => b.Id == id, ct);
+        if (branch == null) return NotFound(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Fail("Branch not found"));
+
+        branch.ChargeMissingStock = request.Enabled;
+        branch.UpdatedAt = DateTimeOffset.UtcNow;
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        var message = request.Enabled ? "Missing stock will be charged to operators at this branch." : "Missing stock charging is off at this branch.";
+        if (remote.MustTravel)
+        {
+            var actor = Guid.TryParse(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier), out var uid) ? uid : Guid.Empty;
+            var receipt = await remote.SendAsync(id, AppleEsportsErp.Api.Services.BranchCommands.SetChargeMissingStock,
+                new { enabled = request.Enabled }, actor, ct);
+            message = receipt.Message;
+        }
+        return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new { message, enabled = request.Enabled }));
     }
 
     [HttpPost("{id}/activate")]

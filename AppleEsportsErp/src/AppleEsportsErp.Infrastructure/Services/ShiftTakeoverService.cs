@@ -369,12 +369,15 @@ public class ShiftTakeoverService : IShiftTakeoverService
             .Where(i => ids.Contains(i.Id) && i.BranchId == handover.BranchId)
             .ToListAsync(ct);
 
+        var missing = new List<(InventoryItem Item, int Missing)>();
+
         foreach (var difference in differences)
         {
             var item = items.FirstOrDefault(i => i.Id == difference.InventoryId);
             if (item == null) continue;
 
             var oldStock = item.CurrentStock;
+            if (difference.Counted < oldStock) missing.Add((item, oldStock - difference.Counted));
             item.CurrentStock = difference.Counted;
             item.UpdatedAt = now;
 
@@ -396,6 +399,19 @@ public class ShiftTakeoverService : IShiftTakeoverService
                 Reason = "Counted while taking over a shift that was left open.",
                 CreatedAt = now,
             });
+        }
+
+        // Missing on handover: the operator who left it pays (StockShortageBilling) - only where
+        // Super Admin has switched that on for this branch.
+        var chargeMissing = await _db.Branches.Where(b => b.Id == handover.BranchId)
+            .Select(b => b.ChargeMissingStock).FirstOrDefaultAsync(ct);
+        var outgoingName = await _db.Operators.Where(o => o.Id == handover.OutgoingOperatorId)
+            .Select(o => o.FullName).FirstOrDefaultAsync(ct);
+        if (chargeMissing && outgoingName is not null
+            && StockShortageBilling.Build(handover.BranchId, handover.OutgoingOperatorId, outgoingName,
+                handover.OutgoingShiftId, missing, now) is { } bill)
+        {
+            _db.Bills.Add(bill);
         }
     }
 

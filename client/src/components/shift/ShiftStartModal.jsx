@@ -46,6 +46,9 @@ export default function ShiftStartModal({ onComplete }) {
   const [invLoading, setInvLoading] = useState(false);
   const [invFetching, setInvFetching] = useState(false);
   const [invError, setInvError] = useState(null);
+  // Set when the opening count found stock missing and the branch charges for it: the bill
+  // went to whoever closed the previous shift, and this operator is told so.
+  const [missingNotice, setMissingNotice] = useState(null);
 
   // Ask the server what to ask: a float, or nothing at all because the drawer carries over.
   useEffect(() => {
@@ -169,10 +172,11 @@ export default function ShiftStartModal({ onComplete }) {
       // The whole opening count, saved as one record (who counted, every item) - shown under
       // the register's note breakdown in the Cash Register history.
       if (updates.length > 0) {
-        await api.post('/inventory/stock-count', {
+        const { data } = await api.post('/inventory/stock-count', {
           kind: 'opening',
           counts: updates.map(u => ({ inventoryId: u.id, counted: u.currentStock })),
         });
+        setMissingNotice(data?.data?.shortage || null);
       }
       setStep(STEPS.DONE);
     } catch (err) {
@@ -517,6 +521,13 @@ export default function ShiftStartModal({ onComplete }) {
                 transition={{ duration: 0.3, type: 'spring', stiffness: 200 }}
                 className="p-8 flex flex-col items-center text-center"
               >
+                {missingNotice && (
+                  <div className="w-full mb-5 p-3 rounded-lg border border-neon-red/50 bg-neon-red/10 text-neon-red text-xs font-bold text-left">
+                    Stock missing at the start of your shift:{' '}
+                    {missingNotice.items.map(i => `${i.quantity} × ${i.itemName.replace(' - missing in stock count', '')}`).join(', ')}.
+                    {' '}₹{Number(missingNotice.amount).toFixed(2)} has been billed to {missingNotice.chargedTo}, who closed the previous shift.
+                  </div>
+                )}
                 <motion.div
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}

@@ -30,6 +30,9 @@ public class UpdateBranchDto
 
 public class BranchDto
 {
+    /// <summary>Charge operators for stock their shift counts find missing (Branch.ChargeMissingStock).</summary>
+    public bool ChargeMissingStock { get; set; }
+
     public Guid Id { get; set; }
     public string Name { get; set; } = null!;
     public string? Address { get; set; }

@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { ROLES } from '../../config/constants';
 import { useBranch } from '../../contexts/BranchContext';
 import {
-  getBranches, createBranch, updateBranch, deleteBranch, activateBranch, deleteBranchPermanent,
+  getBranches, createBranch, updateBranch, deleteBranch, activateBranch, deleteBranchPermanent, setChargeMissingStock,
   getOperators, createOperator, updateOperator, deleteOperator, activateOperator, deleteOperatorPermanent,
   getBranchPcsDetailed, createPc, updatePc, deletePc,
   getAuditLogs,
@@ -187,6 +187,20 @@ export default function SettingsPage() {
       } catch (err) {
         toast.error(err.response?.data?.error || 'Failed to disable operator');
       }
+    }
+  };
+
+  const handleChargeMissingStock = async (branch) => {
+    const enable = !branch.chargeMissingStock;
+    if (!window.confirm(enable
+      ? `Turn ON charging for missing stock at ${branch.name}?\n\nAt shift end the operator counts stock first. Anything missing is billed to them at menu price and must be paid (cash, online, split or credit) before the register can be locked.`
+      : `Turn OFF charging for missing stock at ${branch.name}?\n\nShift end goes back to exactly how it works today.`)) return;
+    try {
+      const res = await setChargeMissingStock(branch.id, enable);
+      toast.success(res?.data?.message || (enable ? 'Turned on' : 'Turned off'));
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to change the missing stock setting');
     }
   };
 
@@ -469,6 +483,7 @@ export default function SettingsPage() {
                           <th>Location Address</th>
                           <th>Operating Hours</th>
                           <th>Status</th>
+                          <th title="Charge operators for stock their shift counts find missing">Missing stock</th>
                           <th className="w-16"></th>
                         </tr>
                       </thead>
@@ -485,9 +500,22 @@ export default function SettingsPage() {
                             <td>
                               <span className={`status-badge ${b.status?.toLowerCase()}`}>{b.status}</span>
                             </td>
+                            <td>
+                              <button
+                                onClick={() => handleChargeMissingStock(b)}
+                                disabled={!isSuperAdmin}
+                                title={isSuperAdmin ? 'Charge operators for missing stock - click to switch' : 'Only Super Admin can change this'}
+                                className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider transition-colors disabled:cursor-not-allowed ${
+                                  b.chargeMissingStock
+                                    ? 'text-neon-green bg-neon-green/10 border-neon-green/40'
+                                    : 'text-text-3 bg-bg-3 border-border'}`}
+                              >
+                                {b.chargeMissingStock ? 'ON' : 'OFF'}
+                              </button>
+                            </td>
                             <td className="text-right relative">
-                              <button 
-                                className="icon-btn hover:text-accent" 
+                              <button
+                                className="icon-btn hover:text-accent"
                                 onClick={(e) => toggleDropdown(e, `branch-${b.id}`)}
                               >
                                 <MoreVertical size={14} />

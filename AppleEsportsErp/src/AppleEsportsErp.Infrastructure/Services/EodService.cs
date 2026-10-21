@@ -127,6 +127,12 @@ public class EodService : IEodService
         report.Revenue.TotalDiscounts = completedBills.Sum(b => b.DiscountAmount);
         report.Revenue.NetRevenue = completedBills.Sum(b => b.TotalAmount) - pendingCredits + earlierCreditsClearedToday;
 
+        // Missing-stock bills: their money is already in Food Revenue and Cash/Online above,
+        // like any bill - shown again on its own so the owner sees who paid for what was missing.
+        report.Revenue.StockShortageRecovered = completedBills.Where(b => b.ShortageOperatorId != null).Sum(b => b.TotalAmount);
+        report.StockShortages = await ReportsService.StockShortagesAsync(_unitOfWork, b => b.BranchId == branchId
+            && ((b.CreatedAt >= dayStart && b.CreatedAt < dayEnd) || (b.CompletedAt >= dayStart && b.CompletedAt < dayEnd)));
+
         // Payment Methods
         report.PaymentMethods.TotalCash = payments.Sum(p => p.CashAmount);
         report.PaymentMethods.TotalOnline = payments.Sum(p => p.OnlineAmount);

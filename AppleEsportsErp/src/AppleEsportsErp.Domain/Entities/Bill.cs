@@ -42,6 +42,13 @@ public class Bill
 
     public BillStatus Status { get; set; } = BillStatus.Pending;
     public bool IsDeferred { get; set; } = false;
+
+    /// <summary>
+    /// Set on a bill the system raised itself because a shift stock count came up short: the
+    /// operator responsible pays for the missing items (StockShortageBilling). Shown as its own
+    /// line in EOD, and its items cannot be removed by an operator.
+    /// </summary>
+    public Guid? ShortageOperatorId { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
