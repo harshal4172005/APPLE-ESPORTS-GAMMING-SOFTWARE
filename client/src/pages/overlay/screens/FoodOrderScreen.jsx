@@ -4,7 +4,7 @@ import { Coffee, Plus, Minus, ShoppingCart, Loader2, CheckCircle2, ShoppingBag }
 import axios from 'axios';
 
 export default function FoodOrderScreen() {
-  const { placeFoodOrder, foodOrders, sessionData, branchId } = useOverlaySocket();
+  const { placeFoodOrder, foodOrders, sessionData, branchId, stockVersion } = useOverlaySocket();
   const [cart, setCart] = useState([]);
   const [activeTab, setActiveTab] = useState('Snacks');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -20,7 +20,7 @@ export default function FoodOrderScreen() {
     const fetchMenu = async () => {
       if (!branchId) return;
       try {
-        setLoadingMenu(true);
+        if (!stockVersion) setLoadingMenu(true);   // a live stock update reloads quietly
         const res = await axios.get(`/api/public/branches/${branchId}/menu`);
         if (res.data.success) {
           setMenuItems(res.data.data);
@@ -36,7 +36,7 @@ export default function FoodOrderScreen() {
       }
     };
     fetchMenu();
-  }, [branchId]);
+  }, [branchId, stockVersion]);
 
   const addToCart = (item) => {
     setCart(prev => {

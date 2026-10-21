@@ -51,6 +51,9 @@ public class FoodGroupDto
     public string Name { get; set; } = null!;
     public DateTimeOffset CreatedAt { get; set; }
     public List<FoodGroupBranchDto> Branches { get; set; } = new();
+
+    /// <summary>The branch that keeps selling the shared fridge when the internet is down.</summary>
+    public Guid? OfflineSellerBranchId { get; set; }
 }
 
 public class FoodGroupBranchDto

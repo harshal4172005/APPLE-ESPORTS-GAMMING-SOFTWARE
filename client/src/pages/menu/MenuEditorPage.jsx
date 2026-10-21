@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useStockVersion } from '../../components/food/SharedStockLive';
 import {
   Plus,
   ClipboardCheck,
@@ -84,6 +85,12 @@ export default function MenuEditorPage() {
       fetchMenu();
     }
   }, [targetBranchId, fetchMenu]);
+
+  // The shared fridge moved (a sale at the other counter, or here) - show it straight away.
+  const stockVersion = useStockVersion();
+  useEffect(() => {
+    if (stockVersion) fetchMenu(true);
+  }, [stockVersion, fetchMenu]);
 
   // Stock now only ever changes through Add Stock or Reconcile, both of which can be done by
   // another admin on another screen - or, from Head Office, land here once the branch actually

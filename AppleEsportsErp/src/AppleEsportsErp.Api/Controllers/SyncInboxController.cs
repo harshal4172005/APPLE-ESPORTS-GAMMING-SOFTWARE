@@ -21,15 +21,13 @@ public class SyncInboxController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IEmailService _email;
-    private readonly IRemoteBranchControl _remote;
     private readonly ILogger<SyncInboxController> _logger;
 
     public SyncInboxController(
-        AppDbContext db, IEmailService email, IRemoteBranchControl remote, ILogger<SyncInboxController> logger)
+        AppDbContext db, IEmailService email, ILogger<SyncInboxController> logger)
     {
         _db = db;
         _email = email;
-        _remote = remote;
         _logger = logger;
     }
 
@@ -552,11 +550,10 @@ public class SyncInboxController : ControllerBase
                 await UpsertRowAsync<InventoryItem>(held, root);
                 break;
 
-            // A shop's shared stock moving by some amount - see SharedStockCapture for why
-            // this travels as a delta rather than a fresh total, and RelaySharedStockDeltaAsync
-            // below for what Head Office does with it.
+            // Sent only by branches older than the Head Office fridge count (SharedStockGate).
+            // Relaying these to the other branch is what looped between the two Adajan branches
+            // on 20 Oct; the count lives here now, so they are kept and not passed on.
             case "inventory_stock_delta.changed":
-                await RelaySharedStockDeltaAsync(held, root);
                 break;
 
             // Food orders never travelled up at all before this. A walk-in order's money
@@ -614,50 +611,6 @@ public class SyncInboxController : ControllerBase
     /// not arrived yet is kept, minus the reference, instead of being rejected outright and
     /// taking the day's takings with it.
     /// </summary>
-    /// <summary>
-    /// A shop's food/snacks stock moving by some amount, told to every other branch sharing the
-    /// same food group so their own count moves by the same amount too.
-    ///
-    /// A branch not in any food group (<see cref="Branch.FoodGroupId"/> null) is untouched by
-    /// this entirely - there is nobody to tell, so this simply returns. For a grouped branch,
-    /// the selling branch has already applied this same change to its own local copy, offline,
-    /// the instant it happened; this is purely about telling its siblings, via the same
-    /// queued-instruction channel already used for a remote payment or discount.
-    /// </summary>
-    private async Task RelaySharedStockDeltaAsync(SyncInboxEntry held, JsonElement root)
-    {
-        var inventoryItemId = ReadGuid(root, "inventoryItemId") ?? held.AggregateId;
-        var delta = ReadInt(root, "delta") ?? 0;
-        if (delta == 0) return;
-
-        var foodGroupId = await _db.Branches.AsNoTracking()
-            .Where(b => b.Id == held.BranchId)
-            .Select(b => b.FoodGroupId)
-            .FirstOrDefaultAsync();
-
-        if (foodGroupId is null) return;
-
-        var siblingIds = await _db.Branches.AsNoTracking()
-            .Where(b => b.FoodGroupId == foodGroupId && b.Id != held.BranchId)
-            .Select(b => b.Id)
-            .ToListAsync();
-
-        foreach (var siblingId in siblingIds)
-        {
-            // The relay's own stable id, not a fresh one, even on a retry of this same entry -
-            // see InventoryLog.SourceRelayEventId. Without it, a retry that got partway through
-            // fanning out to several siblings before failing would queue a second command for
-            // each on the next attempt, and a sibling with no way to recognise the duplicate
-            // would apply the same movement twice.
-            await _remote.SendAsync(siblingId, BranchCommands.RelaySharedStockDelta, new
-            {
-                inventoryItemId,
-                delta,
-                relayEventId = held.Id,
-            }, Guid.Empty, CancellationToken.None);
-        }
-    }
-
     /// <summary>
     /// Same as <see cref="UpsertRowAsync{TEntity}"/>, with one extra step first: the branch is
     /// always the source of truth for its own drawer, so if Head Office is still holding a

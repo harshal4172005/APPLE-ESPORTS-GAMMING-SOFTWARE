@@ -140,6 +140,11 @@ public class FoodOrderService : IFoodOrderService
                 if (inventoryItem.CurrentStock < itemDto.Quantity)
                     throw new AppException($"Insufficient stock for {inventoryItem.ItemName}. Available: {inventoryItem.CurrentStock}");
 
+                // Taken now, not on delivery: checking here and taking later let two orders both
+                // pass for the last one. For a shared fridge this is where Head Office decides
+                // (SharedStockGate, on save) - one of two same-moment orders gets it.
+                await TakeStockAsync(inventoryItem, itemDto.Quantity, branchId, operatorId, $"Order {orderNum} placed", now);
+
                 // Add order item
                 var totalPrice = inventoryItem.Price * itemDto.Quantity;
                 totalAmount += totalPrice;
@@ -156,6 +161,7 @@ public class FoodOrderService : IFoodOrderService
             }
 
             order.TotalAmount = totalAmount;
+            order.StockTaken = true;
 
             // If linked to a Session, lookup active bill to verify it exists and set order attributes
             Bill? activeBill = null;
@@ -316,7 +322,14 @@ public class FoodOrderService : IFoodOrderService
                 foreach (var item in order.Items)
                 {
                     var inventoryItem = await _unitOfWork.Repository<InventoryItem>().GetByIdAsync(item.InventoryId);
-                    if (inventoryItem != null)
+                    if (inventoryItem != null && order.StockTaken)
+                    {
+                        // Stock already came off when the order was placed.
+                        inventoryItem.SoldQty += item.Quantity;
+                        inventoryItem.UpdatedAt = now;
+                        _unitOfWork.Repository<InventoryItem>().Update(inventoryItem);
+                    }
+                    else if (inventoryItem != null)
                     {
                         if (inventoryItem.CurrentStock < item.Quantity)
                             throw new AppException($"Insufficient stock for {inventoryItem.ItemName}. Available: {inventoryItem.CurrentStock}");
@@ -396,6 +409,18 @@ public class FoodOrderService : IFoodOrderService
             else if (dto.Status == OrderStatus.Cancelled)
             {
                 order.CancelledReason = dto.Reason;
+
+                // Taken at placement, so a cancel puts it back on the shelf.
+                if (order.StockTaken)
+                {
+                    foreach (var item in order.Items)
+                    {
+                        var inventoryItem = await _unitOfWork.Repository<InventoryItem>().GetByIdAsync(item.InventoryId);
+                        if (inventoryItem == null) continue;
+                        await TakeStockAsync(inventoryItem, -item.Quantity, branchId, operatorId, $"Order {order.OrderNumber} cancelled", now);
+                    }
+                    order.StockTaken = false;
+                }
             }
 
             _unitOfWork.Repository<FoodOrder>().Update(order);
@@ -447,6 +472,28 @@ public class FoodOrderService : IFoodOrderService
             });
             throw;
         }
+    }
+
+    /// <summary>Takes <paramref name="quantity"/> off the shelf (negative puts it back) and logs it.</summary>
+    private async Task TakeStockAsync(InventoryItem item, int quantity, Guid branchId, Guid operatorId, string reason, DateTimeOffset now)
+    {
+        var oldStock = item.CurrentStock;
+        item.CurrentStock -= quantity;
+        item.UpdatedAt = now;
+        _unitOfWork.Repository<InventoryItem>().Update(item);
+
+        await _unitOfWork.Repository<InventoryLog>().AddAsync(new InventoryLog
+        {
+            InventoryId = item.Id,
+            BranchId = branchId,
+            OperatorId = operatorId == Guid.Empty ? null : operatorId,
+            Action = quantity > 0 ? "sale" : "void_return",
+            Quantity = Math.Abs(quantity),
+            OldValue = oldStock.ToString(),
+            NewValue = item.CurrentStock.ToString(),
+            Reason = reason,
+            CreatedAt = now,
+        });
     }
 
     private static FoodOrderDto MapToDto(FoodOrder o)

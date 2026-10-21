@@ -942,6 +942,10 @@ public class PublicController : ControllerBase
     [HttpGet("branches/{branchId:guid}/menu")]
     public async Task<IActionResult> GetBranchMenu(Guid branchId)
     {
+        // A shared fridge with no internet at a branch that is not the offline seller: nothing
+        // from it can be sold here right now (SharedStockGate), so do not offer it.
+        var canSell = AppleEsportsErp.Infrastructure.Data.SharedStockGate.CanSellShared;
+
         var items = await _db.InventoryItems
             .Where(i => i.BranchId == branchId && i.Status != FoodAvailability.Disabled)
             .OrderBy(i => i.Category)
@@ -951,7 +955,7 @@ public class PublicController : ControllerBase
                 name = i.ItemName,
                 price = i.Price,
                 category = i.Category,
-                inStock = i.Status != FoodAvailability.OutOfStock && i.CurrentStock > 0,
+                inStock = canSell && i.Status != FoodAvailability.OutOfStock && i.CurrentStock > 0,
                 imageUrl = i.ImageUrl
             })
             .ToListAsync();

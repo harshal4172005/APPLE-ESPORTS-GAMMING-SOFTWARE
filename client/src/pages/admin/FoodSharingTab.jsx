@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useBranch } from '../../contexts/BranchContext';
 import { useToast } from '../../components/ui/Toast';
 import Drawer from '../../components/ui/Drawer';
-import { getFoodGroups, createFoodGroup, setFoodGroupBranches, deleteFoodGroup } from '../../api/settings.api';
+import { getFoodGroups, createFoodGroup, setFoodGroupBranches, deleteFoodGroup, setFoodGroupOfflineSeller } from '../../api/settings.api';
 import { Plus, Trash2, Utensils, Save } from 'lucide-react';
 
 export default function FoodSharingTab() {
@@ -65,6 +65,16 @@ export default function FoodSharingTab() {
     }
   };
 
+  const handleOfflineSeller = async (group, branchId) => {
+    try {
+      await setFoodGroupOfflineSeller(group.id, branchId);
+      toast.success(branchId ? 'Saved - this branch sells the shared fridge when the internet is down' : 'Saved');
+      fetchGroups();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to save');
+    }
+  };
+
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this food group? Its branches go back to being fully independent — their existing menus are untouched.')) return;
     try {
@@ -115,6 +125,19 @@ export default function FoodSharingTab() {
                     ? 'No branches linked yet'
                     : g.branches.map(b => b.name).join(', ')}
                 </div>
+                {g.branches.length > 1 && (
+                  <label className="flex flex-wrap items-center gap-2 text-xs text-text-2 mt-2">
+                    When the internet is down, sell the shared fridge only at:
+                    <select
+                      value={g.offlineSellerBranchId || ''}
+                      onChange={e => handleOfflineSeller(g, e.target.value)}
+                      className="form-control text-xs py-1 w-auto"
+                    >
+                      <option value="">Not chosen - no branch sells it offline</option>
+                      {g.branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </label>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button onClick={() => openEdit(g)} className="btn-secondary text-xs px-3 py-1.5 whitespace-nowrap">

@@ -214,6 +214,9 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
 
   // True after 30 s without an answer from the branch server.
   const [isOffline, setIsOffline] = useState(false);
+  // Goes up whenever the branch says stock moved, so the food menu reloads at once (sold out
+  // at the other counter of a shared fridge, or restocked).
+  const [stockVersion, setStockVersion] = useState(0);
   const lastServerAnswerRef = useRef(Date.now());
 
   // Announces the reminder out loud, mirroring the time-remaining alerts.
@@ -417,6 +420,8 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       .build();
 
     // Incoming from server
+    newConnection.on('StockChanged', () => setStockVersion(v => v + 1));
+
     newConnection.on('SessionStarted', () => {
       fetchSession();
     });
@@ -778,6 +783,7 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       dismissLowBalanceWarning: () => setLowBalanceWarning(null),
       timeWarning,
       isOffline,
+      stockVersion,
     }}>
       {children}
     </OverlaySocketContext.Provider>

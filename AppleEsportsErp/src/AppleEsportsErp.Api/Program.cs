@@ -395,6 +395,7 @@ builder.Services.AddScoped<IUnitOfWork, AppleEsportsErp.Infrastructure.Repositor
 builder.Services.AddScoped<ISessionActivityService, SessionActivityService>();
 builder.Services.AddScoped<IMaintenanceLogService, MaintenanceLogService>();
 builder.Services.AddHostedService<AppleEsportsErp.Api.Services.ReservationBackgroundService>();
+builder.Services.AddHostedService<AppleEsportsErp.Api.Services.SharedStockWatcher>();
 builder.Services.AddHostedService<AppleEsportsErp.Api.Services.OpenSessionMonitorService>();
 
 // Closes a trading day that has ended when nobody ticked "last shift of the day", so the report

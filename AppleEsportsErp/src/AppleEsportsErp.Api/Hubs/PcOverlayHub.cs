@@ -173,6 +173,36 @@ public class PcOverlayHub : Hub
                     }).ToList()
                 };
 
+                // Taken off the shelf now, same as an order placed at the counter
+                // (FoodOrderService) - this path never checked stock at all, so a gaming PC
+                // could order something the fridge no longer had. For a shared fridge the save
+                // below asks Head Office (SharedStockGate) and may refuse with "sold out".
+                foreach (var line in order.Items.Where(i => i.InventoryId != Guid.Empty))
+                {
+                    var stock = await _db.InventoryItems.FirstOrDefaultAsync(i => i.Id == line.InventoryId);
+                    if (stock is null) continue;
+                    if (stock.CurrentStock < line.Quantity)
+                        return new { success = false, error = stock.CurrentStock <= 0
+                            ? $"{stock.ItemName} is sold out."
+                            : $"Only {stock.CurrentStock} {stock.ItemName} left." };
+
+                    _db.InventoryLogs.Add(new InventoryLog
+                    {
+                        Id = Guid.NewGuid(),
+                        InventoryId = stock.Id,
+                        BranchId = pc.BranchId,
+                        Action = "sale",
+                        Quantity = line.Quantity,
+                        OldValue = stock.CurrentStock.ToString(),
+                        NewValue = (stock.CurrentStock - line.Quantity).ToString(),
+                        Reason = $"Order {order.OrderNumber} placed from {pc.PcName ?? pc.PcNumber}",
+                        CreatedAt = DateTimeOffset.UtcNow,
+                    });
+                    stock.CurrentStock -= line.Quantity;
+                    stock.UpdatedAt = DateTimeOffset.UtcNow;
+                }
+                order.StockTaken = true;
+
                 _db.FoodOrders.Add(order);
 
                 if (session != null)
@@ -232,6 +262,11 @@ public class PcOverlayHub : Hub
             // PC not found fallback
             await _foodOrderHub.Clients.Group("admin:all").SendAsync("NewFoodOrder", payload);
             return new { success = true, orderId = payload.OrderId };
+        }
+        catch (AppleEsportsErp.Application.Exceptions.AppException ex)
+        {
+            // Sold out at the other counter, or the shared fridge is offline here - say so.
+            return new { success = false, error = ex.Message };
         }
         catch (Exception ex)
         {

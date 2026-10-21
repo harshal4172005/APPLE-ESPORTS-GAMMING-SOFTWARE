@@ -26,6 +26,13 @@ public class FoodOrder
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
+    /// <summary>
+    /// Stock was taken off when the order was placed (so two people can never both order the
+    /// last one). Delivery then must not take it again; cancelling gives it back. False only
+    /// for orders placed before this existed, which still take their stock on delivery.
+    /// </summary>
+    public bool StockTaken { get; set; }
+
     // Navigation
     public Session? Session { get; set; }
     public Pc? Pc { get; set; }

@@ -62,6 +62,9 @@ public class AppDbContext : DbContext
     // Sync engine — outbox is what a branch owes Head Office, inbox is what Head Office
     // has been told by its branches.
     public DbSet<SyncOutboxEntry> SyncOutboxEntries => Set<SyncOutboxEntry>();
+    public DbSet<SharedStockCount> SharedStockCounts => Set<SharedStockCount>();
+    public DbSet<SharedStockRequest> SharedStockRequests => Set<SharedStockRequest>();
+    public DbSet<SharedStockPending> SharedStockPending => Set<SharedStockPending>();
     public DbSet<SyncInboxEntry> SyncInboxEntries => Set<SyncInboxEntry>();
 
     // Power cuts and lost connections, for the EOD and printed reports
@@ -81,15 +84,53 @@ public class AppDbContext : DbContext
     /// </summary>
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
-        CaptureForSync();
-        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        // Shared-fridge stock is asked of Head Office first - see SharedStockGate.
+        var applied = await SharedStockGate.ApplyAsync(this, cancellationToken);
+        try
+        {
+            CaptureForSync();
+            var written = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            HoldOrForget(applied);
+            return written;
+        }
+        catch
+        {
+            await SharedStockGate.UndoAsync(applied);
+            throw;
+        }
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        CaptureForSync();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        var applied = SharedStockGate.ApplyAsync(this, CancellationToken.None).GetAwaiter().GetResult();
+        try
+        {
+            CaptureForSync();
+            var written = base.SaveChanges(acceptAllChangesOnSuccess);
+            HoldOrForget(applied);
+            return written;
+        }
+        catch
+        {
+            SharedStockGate.UndoAsync(applied).GetAwaiter().GetResult();
+            throw;
+        }
     }
+
+    /// <summary>
+    /// Shared-stock changes Head Office applied for a save inside a transaction that has not
+    /// committed yet. A rollback must take them back at Head Office too (UnitOfWork).
+    /// </summary>
+    private readonly List<SharedStockGate.AppliedOp> _sharedStockUncommitted = new();
+
+    private void HoldOrForget(List<SharedStockGate.AppliedOp> applied)
+    {
+        if (Database.CurrentTransaction is not null) _sharedStockUncommitted.AddRange(applied);
+    }
+
+    public void SharedStockCommitted() => _sharedStockUncommitted.Clear();
+
+    public Task SharedStockRolledBackAsync() => SharedStockGate.UndoAsync(_sharedStockUncommitted);
 
     private void CaptureForSync()
     {
@@ -97,9 +138,6 @@ public class AppDbContext : DbContext
 
         var entries = SyncCapture.Collect(ChangeTracker);
         if (entries.Count > 0) SyncOutboxEntries.AddRange(entries);
-
-        var stockDeltaEntries = SharedStockCapture.Collect(ChangeTracker);
-        if (stockDeltaEntries.Count > 0) SyncOutboxEntries.AddRange(stockDeltaEntries);
     }
 
     /// <summary>
@@ -162,6 +200,7 @@ public class AppDbContext : DbContext
         // PostgreSQL extensions
         modelBuilder.HasPostgresExtension("uuid-ossp");
         modelBuilder.HasPostgresExtension("pgcrypto");
+        modelBuilder.HasSequence<long>("shared_stock_version_seq");
 
         // Hardening C.1: Optimistic Concurrency via PostgreSQL xmin
         modelBuilder.Entity<Session>().UseXminAsConcurrencyToken();

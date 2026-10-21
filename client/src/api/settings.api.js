@@ -42,6 +42,12 @@ export const setFoodGroupBranches = async (id, branchIds) => {
   return response.data;
 };
 
+// The one branch that keeps selling the shared fridge when the internet is down.
+export const setFoodGroupOfflineSeller = async (id, branchId) => {
+  const response = await api.put(`/food-groups/${id}/offline-seller`, { branchId: branchId || null });
+  return response.data;
+};
+
 export const deleteFoodGroup = async (id) => {
   const response = await api.delete(`/food-groups/${id}`);
   return response.data;

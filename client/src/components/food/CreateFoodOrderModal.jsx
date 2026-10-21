@@ -3,9 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ShoppingCart, Plus, Minus, AlertTriangle, Monitor, User } from 'lucide-react';
 import api from '../../config/api';
 import { useBranch } from '../../contexts/BranchContext';
+import { useStockVersion, SharedStockBanner } from './SharedStockLive';
 
 export default function CreateFoodOrderModal({ onClose, onOrderPlaced, initialPcId }) {
   const { activeBranch } = useBranch();
+  const stockVersion = useStockVersion();
   const [inventory, setInventory] = useState([]);
   const [cart, setCart] = useState([]); // { item, quantity }
   const [loading, setLoading] = useState(true);
@@ -41,7 +43,7 @@ export default function CreateFoodOrderModal({ onClose, onOrderPlaced, initialPc
       }
     };
     fetchInitialData();
-  }, [activeBranch]);
+  }, [activeBranch, stockVersion]);
 
   const addToCart = (invItem) => {
     setCart(prev => {
@@ -123,6 +125,7 @@ export default function CreateFoodOrderModal({ onClose, onOrderPlaced, initialPc
             </div>
             
             <div className="flex-1 overflow-y-auto p-4">
+              <SharedStockBanner />
               {loading ? (
                 <div className="flex justify-center items-center h-full">
                   <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />

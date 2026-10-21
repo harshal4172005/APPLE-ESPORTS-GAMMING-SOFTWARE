@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useStockVersion } from '../../components/food/SharedStockLive';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   UtensilsCrossed, 
@@ -122,11 +123,12 @@ export default function CustomerPanelPage() {
     }
   }, [selectedBranchId, selectedSessionId, pcNumber, customerName, member]);
 
+  const stockVersion = useStockVersion();
   useEffect(() => {
     if (isInitialized) {
       loadMenuAndOrders();
     }
-  }, [isInitialized, loadMenuAndOrders]);
+  }, [isInitialized, loadMenuAndOrders, stockVersion]);
 
   // Real-Time update subscription
   useEffect(() => {

@@ -24,6 +24,8 @@ namespace AppleEsportsErp.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "uuid-ossp");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence("shared_stock_version_seq");
+
             modelBuilder.Entity("AppleEsportsErp.Domain.Entities.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1163,6 +1165,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<Guid?>("OfflineSellerBranchId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.ToTable("food_groups", (string)null);
@@ -1237,6 +1242,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasDefaultValue("pending");
+
+                    b.Property<bool>("StockTaken")
+                        .HasColumnType("boolean");
 
                     b.Property<decimal>("TotalAmount")
                         .ValueGeneratedOnAdd()
@@ -2625,6 +2633,95 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.HasIndex("SessionId");
 
                     b.ToTable("SessionActivities");
+                });
+
+            modelBuilder.Entity("AppleEsportsErp.Domain.Entities.SharedStockCount", b =>
+                {
+                    b.Property<Guid>("FoodGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("FoodGroupId", "InventoryItemId");
+
+                    b.HasIndex("FoodGroupId", "Version");
+
+                    b.ToTable("shared_stock_counts", (string)null);
+                });
+
+            modelBuilder.Entity("AppleEsportsErp.Domain.Entities.SharedStockPending", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Op")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("shared_stock_pending", (string)null);
+                });
+
+            modelBuilder.Entity("AppleEsportsErp.Domain.Entities.SharedStockRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FoodGroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Op")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RefusedReason")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int?>("ResultCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.ToTable("shared_stock_requests", (string)null);
                 });
 
             modelBuilder.Entity("AppleEsportsErp.Domain.Entities.Shift", b =>
