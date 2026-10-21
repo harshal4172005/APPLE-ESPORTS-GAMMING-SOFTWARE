@@ -22,6 +22,37 @@ const readStoredDate = (key) => {
   }
 };
 
+// A register's shift-start and shift-end stock counts, under its note breakdown: who counted,
+// when, and every item with what the system said - short or extra in colour, like cash.
+function StockCounts({ counts }) {
+  if (!counts?.length) {
+    return <div className="mt-2 text-text-3 italic font-sans">No stock count recorded for this shift.</div>;
+  }
+  return counts.map((c, i) => (
+    <div key={i} className="mt-3 font-sans">
+      <div className="text-[10px] text-text-3 font-bold uppercase tracking-wider mb-1">
+        Stock {c.kind === 'opening' ? 'at shift start' : 'at shift end'} · counted by{' '}
+        <span className="text-neon-blue">{c.operatorName}</span> at {format(new Date(c.countedAt), 'MMM d, hh:mm a')}
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono">
+        {c.lines.map(l => {
+          const diff = l.counted - l.system;
+          return (
+            <span key={l.inventoryId} className="text-text-2">
+              {l.itemName} <span className="text-text font-bold">{l.counted}</span>
+              {diff !== 0 && (
+                <span className={diff < 0 ? 'text-neon-red font-bold' : 'text-neon-orange font-bold'}>
+                  {' '}(system {l.system}, {diff < 0 ? `${-diff} short` : `${diff} extra`})
+                </span>
+              )}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  ));
+}
+
 export default function CashRegisterPage() {
   const navigate = useNavigate();
   const { isSuperAdmin, isTrueSuperAdmin, user, logout } = useAuth();
@@ -279,17 +310,19 @@ export default function CashRegisterPage() {
     return () => { alive = false; };
   }, [register?.status, isTrueSuperAdmin, inventory]);
 
-  // Only items whose count the operator actually changed get written back.
+  // The whole count is saved against this register - every item, including the ones that
+  // matched - so Super Admin sees who counted what under the note breakdown in the history.
   const confirmStock = async () => {
     setStockBusy(true);
     setStockError('');
     try {
-      for (const item of inventory || []) {
+      const counts = (inventory || []).map(item => {
         const was = Number(item.currentStock ?? item.CurrentStock ?? 0);
         const now = Number(counted[item.id]);
-        if (!Number.isNaN(now) && now !== was) {
-          await api.patch('/inventory/' + item.id + '/stock', { currentStock: now });
-        }
+        return { inventoryId: item.id, counted: Number.isNaN(now) || counted[item.id] === undefined || counted[item.id] === '' ? was : now };
+      });
+      if (counts.length > 0) {
+        await api.post('/inventory/stock-count', { kind: 'closing', cashRegisterId: register?.id, counts });
       }
       setStockChecked(true);
     } catch (err) {
@@ -475,6 +508,7 @@ export default function CashRegisterPage() {
                     {isExpanded && (
                       <tr>
                         <td colSpan={8} className="py-2 px-3 bg-bg-3/30">
+                          <div className="text-[10px] text-text-3 font-bold uppercase tracking-wider mb-1 font-sans">Cash</div>
                           {denominations.length === 0 ? (
                             <span className="text-text-3 italic">
                               {r.closedAt
@@ -490,6 +524,7 @@ export default function CashRegisterPage() {
                               ))}
                             </div>
                           )}
+                          <StockCounts counts={r.stockCounts} />
                         </td>
                       </tr>
                     )}

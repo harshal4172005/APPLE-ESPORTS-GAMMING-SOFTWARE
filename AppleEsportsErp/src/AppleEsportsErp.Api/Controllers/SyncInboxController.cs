@@ -556,6 +556,10 @@ public class SyncInboxController : ControllerBase
             case "inventory_stock_delta.changed":
                 break;
 
+            case "stock_count.changed":
+                await UpsertRowAsync<StockCount>(held, root);
+                break;
+
             // Food orders never travelled up at all before this. A walk-in order's money
             // happened to arrive because its Bill is separately watched, but a session-linked
             // order updated nothing synced until the food was marked delivered - and even then

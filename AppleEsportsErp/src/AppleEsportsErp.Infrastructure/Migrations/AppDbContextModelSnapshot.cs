@@ -2875,6 +2875,50 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.ToTable("shift_handovers", (string)null);
                 });
 
+            modelBuilder.Entity("AppleEsportsErp.Domain.Entities.StockCount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CashRegisterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CountedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("Lines")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("OperatorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OperatorName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("ShiftId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CashRegisterId");
+
+                    b.HasIndex("BranchId", "CountedAt");
+
+                    b.ToTable("stock_counts", (string)null);
+                });
+
             modelBuilder.Entity("AppleEsportsErp.Domain.Entities.SyncInboxEntry", b =>
                 {
                     b.Property<Guid>("Id")

@@ -166,13 +166,13 @@ export default function ShiftStartModal({ onComplete }) {
         currentStock: Number(stockUpdates[item.id] ?? item.currentStock ?? item.CurrentStock ?? 0),
       }));
 
-      // Batch update inventory stock via API
-      for (const update of updates) {
-        const original = inventory.find(i => i.id === update.id);
-        const originalStock = original?.currentStock ?? original?.CurrentStock ?? 0;
-        if (update.currentStock !== originalStock) {
-          await api.patch(`/inventory/${update.id}/stock`, { currentStock: update.currentStock });
-        }
+      // The whole opening count, saved as one record (who counted, every item) - shown under
+      // the register's note breakdown in the Cash Register history.
+      if (updates.length > 0) {
+        await api.post('/inventory/stock-count', {
+          kind: 'opening',
+          counts: updates.map(u => ({ inventoryId: u.id, counted: u.currentStock })),
+        });
       }
       setStep(STEPS.DONE);
     } catch (err) {

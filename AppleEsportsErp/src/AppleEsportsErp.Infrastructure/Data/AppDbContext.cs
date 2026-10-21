@@ -65,6 +65,7 @@ public class AppDbContext : DbContext
     public DbSet<SharedStockCount> SharedStockCounts => Set<SharedStockCount>();
     public DbSet<SharedStockRequest> SharedStockRequests => Set<SharedStockRequest>();
     public DbSet<SharedStockPending> SharedStockPending => Set<SharedStockPending>();
+    public DbSet<StockCount> StockCounts => Set<StockCount>();
     public DbSet<SyncInboxEntry> SyncInboxEntries => Set<SyncInboxEntry>();
 
     // Power cuts and lost connections, for the EOD and printed reports

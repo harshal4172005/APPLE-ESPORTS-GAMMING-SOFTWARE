@@ -65,6 +65,20 @@ public class SharedStockRequestConfiguration : IEntityTypeConfiguration<SharedSt
     }
 }
 
+public class StockCountConfiguration : IEntityTypeConfiguration<StockCount>
+{
+    public void Configure(EntityTypeBuilder<StockCount> builder)
+    {
+        builder.ToTable("stock_counts");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.OperatorName).HasMaxLength(100).IsRequired();
+        builder.Property(e => e.Kind).HasMaxLength(10).IsRequired();
+        builder.Property(e => e.Lines).HasColumnType("jsonb").IsRequired();
+        builder.HasIndex(e => e.CashRegisterId);
+        builder.HasIndex(e => new { e.BranchId, e.CountedAt });
+    }
+}
+
 public class SharedStockPendingConfiguration : IEntityTypeConfiguration<SharedStockPending>
 {
     public void Configure(EntityTypeBuilder<SharedStockPending> builder)

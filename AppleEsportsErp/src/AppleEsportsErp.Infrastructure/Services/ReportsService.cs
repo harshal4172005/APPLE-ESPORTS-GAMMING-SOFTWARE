@@ -40,6 +40,17 @@ public class ReportsService : IReportsService
 
         var reports = new List<ReconciliationReportDto>();
 
+        // Each register's shift stock counts - matched by register, or by shift for a count
+        // saved before the register was known.
+        var registerIds = registers.Select(r => r.Id).ToList();
+        var shiftIds = registers.Select(r => r.ShiftId).ToList();
+        var counts = await _unitOfWork.Repository<StockCount>().Query()
+            .Where(c => (c.CashRegisterId != null && registerIds.Contains(c.CashRegisterId.Value))
+                     || (c.CashRegisterId == null && c.ShiftId != null && shiftIds.Contains(c.ShiftId.Value)))
+            .OrderBy(c => c.CountedAt)
+            .ToListAsync();
+        var readLines = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
         foreach (var r in registers)
         {
             var denom = r.DenominationCounts.OrderByDescending(d => d.CreatedAt).FirstOrDefault();
@@ -68,7 +79,18 @@ public class ReportsService : IReportsService
                 Notes10 = denom?.Notes10 ?? 0,
                 Coins5 = denom?.Coins5 ?? 0,
                 Coins2 = denom?.Coins2 ?? 0,
-                Coins1 = denom?.Coins1 ?? 0
+                Coins1 = denom?.Coins1 ?? 0,
+
+                StockCounts = counts
+                    .Where(c => c.CashRegisterId == r.Id || (c.CashRegisterId == null && c.ShiftId == r.ShiftId))
+                    .Select(c => new StockCountDto
+                    {
+                        Kind = c.Kind,
+                        OperatorName = c.OperatorName,
+                        CountedAt = c.CountedAt,
+                        Lines = System.Text.Json.JsonSerializer.Deserialize<List<StockCountLineDto>>(c.Lines, readLines) ?? new(),
+                    })
+                    .ToList(),
             });
         }
 

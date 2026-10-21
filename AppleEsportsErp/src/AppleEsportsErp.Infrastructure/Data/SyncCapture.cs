@@ -119,6 +119,10 @@ public static class SyncCapture
         // restock a branch that has just sold out.
         [typeof(InventoryItem)] = "inventory_item",
 
+        // A shift's whole stock count, so Super Admin sees who counted what under each
+        // register's note breakdown at Head Office too. Insert-only, like AuditLog.
+        [typeof(StockCount)] = "stock_count",
+
         // Reservations, which had never travelled at all.
         //
         // This was reported as "reservations are broken on the Head Office panel", and the
