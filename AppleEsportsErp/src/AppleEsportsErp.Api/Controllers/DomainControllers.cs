@@ -726,6 +726,92 @@ public class InventoryController : ControllerBase
     }
 
     public record UpdateStockRequest(int CurrentStock);
+
+    public record StockCountLineRequest(Guid InventoryId, int Counted);
+    public record StockCountRequest(string Kind, Guid? CashRegisterId, List<StockCountLineRequest> Counts);
+
+    /// <summary>
+    /// A shift's whole stock count in one go - the shift-start and shift-end counts. Every item
+    /// is recorded with what the system said and what was counted (a StockCount, shown under
+    /// the note breakdown in the Cash Register history and synced to Head Office), and any item
+    /// that differed is set to the counted number, logged as a count the same as UpdateStock.
+    /// </summary>
+    [HttpPost("stock-count")]
+    [Authorize(Roles = Roles.SuperAdmin + "," + Roles.Admin + "," + Roles.Operator)]
+    public async Task<IActionResult> RecordStockCount([FromBody] StockCountRequest request)
+    {
+        if (_configuration.IsHeadOffice())
+            return BadRequest(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Fail(
+                "A stock count has to be done at the branch, by whoever is looking at the shelf.",
+                "BRANCH_ONLY_OPERATION"));
+
+        var userId = CurrentUserId();
+        var now = DateTimeOffset.UtcNow;
+
+        var ids = request.Counts.Select(c => c.InventoryId).ToList();
+        var items = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryItem>().Query()
+            .Where(i => ids.Contains(i.Id)).ToListAsync();
+
+        // An Admin's request carries no branch unless the screen sent one; at a branch install
+        // the items being counted say which branch this is.
+        var branchId = Guid.TryParse(HttpContext.Items["BranchId"]?.ToString(), out var b) ? b
+            : items.FirstOrDefault()?.BranchId ?? Guid.Empty;
+
+        var name = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Operator>().Query()
+                .Where(o => o.Id == userId).Select(o => o.FullName).FirstOrDefaultAsync()
+            ?? await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.User>().Query()
+                .Where(u => u.Id == userId).Select(u => u.FullName).FirstOrDefaultAsync()
+            ?? "Unknown";
+        var shiftId = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Shift>().Query()
+            .Where(s => s.BranchId == branchId && s.OperatorId == userId && s.Status == AppleEsportsErp.Domain.Enums.ShiftStatus.Active)
+            .Select(s => (Guid?)s.Id).FirstOrDefaultAsync();
+        var registerId = request.CashRegisterId ?? await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.CashRegister>().Query()
+            .Where(r => r.BranchId == branchId && r.Status != AppleEsportsErp.Domain.Enums.CashRegisterStatus.Closed)
+            .OrderByDescending(r => r.OpenedAt).Select(r => (Guid?)r.Id).FirstOrDefaultAsync();
+
+        var lines = new List<object>();
+        foreach (var count in request.Counts)
+        {
+            var item = items.FirstOrDefault(i => i.Id == count.InventoryId);
+            if (item is null) continue;
+            lines.Add(new { inventoryId = item.Id, itemName = item.ItemName, system = item.CurrentStock, counted = count.Counted });
+            if (count.Counted == item.CurrentStock) continue;
+
+            await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryLog>().AddAsync(new AppleEsportsErp.Domain.Entities.InventoryLog
+            {
+                Id = Guid.NewGuid(),
+                InventoryId = item.Id,
+                BranchId = item.BranchId,
+                OperatorId = userId == Guid.Empty ? null : userId,
+                Action = "discrepancy",
+                Quantity = count.Counted - item.CurrentStock,
+                OldValue = item.CurrentStock.ToString(),
+                NewValue = count.Counted.ToString(),
+                Reason = request.Kind == "opening" ? "Shift start stock count" : "Shift end stock count",
+                CreatedAt = now,
+            });
+            item.CurrentStock = count.Counted;
+            item.UpdatedAt = now;
+            AppleEsportsErp.Infrastructure.Data.SharedStockGate.SetAvailability(item, count.Counted);
+            _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryItem>().Update(item);
+        }
+
+        await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.StockCount>().AddAsync(new AppleEsportsErp.Domain.Entities.StockCount
+        {
+            Id = Guid.NewGuid(),
+            BranchId = branchId,
+            CashRegisterId = registerId,
+            ShiftId = shiftId,
+            OperatorId = userId == Guid.Empty ? null : userId,
+            OperatorName = name,
+            Kind = request.Kind == "opening" ? "opening" : "closing",
+            CountedAt = now,
+            Lines = System.Text.Json.JsonSerializer.Serialize(lines),
+        });
+        await _unitOfWork.SaveChangesAsync();
+
+        return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new { lines }));
+    }
 }
 
 public class CreateInventoryItemDto

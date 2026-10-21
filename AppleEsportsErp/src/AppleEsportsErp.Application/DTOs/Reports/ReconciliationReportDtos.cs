@@ -29,4 +29,23 @@ public class ReconciliationReportDto
     public int Coins5 { get; set; }
     public int Coins2 { get; set; }
     public int Coins1 { get; set; }
+
+    /// <summary>Stock counted at this register's shift start and end, oldest first.</summary>
+    public List<StockCountDto> StockCounts { get; set; } = new();
+}
+
+public class StockCountDto
+{
+    public string Kind { get; set; } = string.Empty;
+    public string OperatorName { get; set; } = string.Empty;
+    public DateTimeOffset CountedAt { get; set; }
+    public List<StockCountLineDto> Lines { get; set; } = new();
+}
+
+public class StockCountLineDto
+{
+    public Guid InventoryId { get; set; }
+    public string ItemName { get; set; } = string.Empty;
+    public int System { get; set; }
+    public int Counted { get; set; }
 }
