@@ -39,7 +39,12 @@ public static class SharedStockGate
     /// <summary>Whether the last call to Head Office got through. Drives the "not live" banner.</summary>
     public static volatile bool Online = true;
 
-    public static bool IsSeller => Membership is { } m && m.SellerBranchId == BranchId;
+    /// <summary>
+    /// This branch may sell the shared fridge with no line to Head Office: it is the group's
+    /// chosen offline seller - or no seller has been chosen, in which case every branch keeps
+    /// selling from its own count rather than the whole group stopping (Settings → Food sharing).
+    /// </summary>
+    public static bool IsSeller => Membership is { } m && (m.SellerBranchId == BranchId || m.SellerBranchId is null);
 
     /// <summary>False while offline at a branch that is not the group's offline seller.</summary>
     public static bool CanSellShared => Membership is null || Online || IsSeller;

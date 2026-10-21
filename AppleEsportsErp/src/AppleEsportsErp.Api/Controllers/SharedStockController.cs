@@ -187,9 +187,11 @@ public class SharedStockController : ControllerBase
             sellerName = m?.SellerName,
             canSell = SharedStockGate.CanSellShared,
             message = m is not null && !SharedStockGate.Online
-                ? (SharedStockGate.IsSeller
-                    ? "No internet - selling the shared fridge from this counter only. The other branch's counter is paused."
-                    : SharedStockGate.OfflineMessage(m))
+                ? (m.SellerBranchId is null
+                    ? "No internet - the fridge count is not live. Sales here are sent to Head Office when the line is back; check the shelf."
+                    : SharedStockGate.IsSeller
+                        ? "No internet - selling the shared fridge from this counter only. The other branch's counter is paused."
+                        : SharedStockGate.OfflineMessage(m))
                 : null,
         }));
     }
