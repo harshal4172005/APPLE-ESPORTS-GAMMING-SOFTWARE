@@ -244,14 +244,14 @@ export default function FoodOrdersPage() {
       if (Notification.permission === 'granted') {
         new Notification("TEST NOTIFICATION", {
           body: "New food order from Station PC-01! (This is a test)",
-          icon: "/favicon.ico"
+          icon: "/favicon.png"
         });
       } else if (Notification.permission !== 'denied') {
         Notification.requestPermission().then(permission => {
           if (permission === 'granted') {
             new Notification("TEST NOTIFICATION", {
               body: "New food order from Station PC-01! (This is a test)",
-              icon: "/favicon.ico"
+              icon: "/favicon.png"
             });
           }
         });
