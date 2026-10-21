@@ -40,7 +40,16 @@ public class UnitOfWork : IUnitOfWork
             return;
         }
         await _db.SaveChangesAsync(ct);
-        await _transaction.CommitAsync(ct);
+        try
+        {
+            await _transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            await _db.SharedStockRolledBackAsync();
+            throw;
+        }
+        _db.SharedStockCommitted();
         await _transaction.DisposeAsync();
         _transaction = null;
     }
@@ -58,6 +67,7 @@ public class UnitOfWork : IUnitOfWork
     public async Task RollbackTransactionAsync(CancellationToken ct = default)
     {
         if (_transaction == null) return;
+        await _db.SharedStockRolledBackAsync();   // Head Office's shared count follows the rollback
         await _transaction.RollbackAsync(ct);
         await _transaction.DisposeAsync();
         _transaction = null;

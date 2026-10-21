@@ -42,6 +42,39 @@ public class FoodGroupConfiguration : IEntityTypeConfiguration<FoodGroup>
     }
 }
 
+/// <summary>Head Office's one count per shared-fridge item - see SharedStockCount.</summary>
+public class SharedStockCountConfiguration : IEntityTypeConfiguration<SharedStockCount>
+{
+    public void Configure(EntityTypeBuilder<SharedStockCount> builder)
+    {
+        builder.ToTable("shared_stock_counts");
+        builder.HasKey(e => new { e.FoodGroupId, e.InventoryItemId });
+        builder.HasIndex(e => new { e.FoodGroupId, e.Version });
+    }
+}
+
+public class SharedStockRequestConfiguration : IEntityTypeConfiguration<SharedStockRequest>
+{
+    public void Configure(EntityTypeBuilder<SharedStockRequest> builder)
+    {
+        builder.ToTable("shared_stock_requests");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Op).HasMaxLength(10).IsRequired();
+        builder.Property(e => e.RefusedReason).HasMaxLength(300);
+        builder.HasIndex(e => e.CreatedAt);
+    }
+}
+
+public class SharedStockPendingConfiguration : IEntityTypeConfiguration<SharedStockPending>
+{
+    public void Configure(EntityTypeBuilder<SharedStockPending> builder)
+    {
+        builder.ToTable("shared_stock_pending");
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Op).HasMaxLength(10).IsRequired();
+    }
+}
+
 /// <summary>SOP §5.1: Super Admin accounts — schema.sql L29-40</summary>
 public class UserConfiguration : IEntityTypeConfiguration<User>
 {

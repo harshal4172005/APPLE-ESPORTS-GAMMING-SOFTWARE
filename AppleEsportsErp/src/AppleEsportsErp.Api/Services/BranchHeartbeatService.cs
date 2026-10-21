@@ -456,8 +456,10 @@ public class BranchHeartbeatService : BackgroundService
             case BranchCommands.GiveMemberBonus:
                 return await RunGiveMemberBonusAsync(scoped, command.Id, command.Payload, ct);
 
+            // Retired: the shared fridge's count now lives at Head Office (SharedStockGate).
+            // Applying a leftover relay here would move that count a second time.
             case BranchCommands.RelaySharedStockDelta:
-                return await RunRelaySharedStockDeltaAsync(scoped, command.Payload, ct);
+                return (true, "Ignored - the shared fridge count is kept at Head Office now.");
 
             default:
                 return (false, $"This branch does not know the command '{command.CommandType}' yet.");
@@ -880,73 +882,6 @@ public class BranchHeartbeatService : BackgroundService
         {
             return (false, ex.GetBaseException().Message);
         }
-    }
-
-    /// <summary>
-    /// A sibling branch's shared food/snacks stock moving by some amount, applied here as the
-    /// same movement to this branch's own local copy of that item.
-    ///
-    /// Clamped to zero. Two branches sharing one pantry can each only ever know their own count
-    /// between sync beats, so a same-moment sale at both is still possible - each branch's own
-    /// local sale already refused to oversell against what it knew (FoodOrderService), but the
-    /// two branches' otherwise-valid sales can still add up to more than the shared item ever
-    /// had. Letting the total go negative here just moves that same overselling into the
-    /// stock count itself instead of preventing it; zero is the honest floor for "how much is
-    /// left," and the sibling branch that sold into an already-empty shelf is the one this
-    /// shows up for by seeing 0 instead of the sale count it expected.
-    /// </summary>
-    private static async Task<(bool, string)> RunRelaySharedStockDeltaAsync(
-        IServiceProvider scoped, string payload, CancellationToken ct)
-    {
-        Guid inventoryItemId, relayEventId;
-        int delta;
-        try
-        {
-            using var doc = JsonDocument.Parse(payload);
-            var root = doc.RootElement;
-            inventoryItemId = root.GetProperty("inventoryItemId").GetGuid();
-            delta = root.GetProperty("delta").GetInt32();
-            relayEventId = root.GetProperty("relayEventId").GetGuid();
-        }
-        catch
-        {
-            return (false, "The shared-stock command arrived without a readable item id and amount.");
-        }
-
-        var db = scoped.GetRequiredService<AppDbContext>();
-
-        // The dedupe guard: a redelivery of the exact same relay (this command retried, or
-        // Head Office's own fan-out retried after a partial failure) must not move the count
-        // twice. See InventoryLog.SourceRelayEventId.
-        if (await db.Set<InventoryLog>().AnyAsync(l => l.SourceRelayEventId == relayEventId, ct))
-            return (true, "Already applied.");
-
-        var item = await db.Set<InventoryItem>().FirstOrDefaultAsync(i => i.Id == inventoryItemId, ct);
-
-        // Not a failure worth logging as one: this branch's own copy of a shared item is
-        // materialised by the ordinary catalogue push (BranchHeartbeatController.
-        // ConfigForBranchIfChangedAsync), which cannot have landed after a sale already
-        // happened at a sibling for an item nobody here has ever heard of. Retrying on the
-        // next beat gives that push a chance to arrive first.
-        if (item is null) return (false, "This branch does not know this shared item yet.");
-
-        item.CurrentStock = Math.Max(0, item.CurrentStock + delta);
-
-        db.Set<InventoryLog>().Add(new InventoryLog
-        {
-            Id = Guid.NewGuid(),
-            InventoryId = item.Id,
-            BranchId = item.BranchId,
-            Action = "shared_sync",
-            Quantity = delta,
-            Reason = "Shared stock update from a linked branch",
-            SourceRelayEventId = relayEventId,
-            CreatedAt = DateTimeOffset.UtcNow,
-        });
-
-        await db.SaveChangesAsync(ct);
-
-        return (true, $"Applied. {item.ItemName} now at {item.CurrentStock}.");
     }
 
     private static async Task<(bool, string)> RunDeleteInventoryItemAsync(

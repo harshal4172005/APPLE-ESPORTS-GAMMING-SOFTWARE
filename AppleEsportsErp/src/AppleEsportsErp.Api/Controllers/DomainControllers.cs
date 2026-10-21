@@ -700,6 +700,22 @@ public class InventoryController : ControllerBase
         if (item == null)
             return NotFound(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Fail("Inventory item not found"));
 
+        // Logged as a count ("discrepancy") - which is also what tells a shared fridge's gate
+        // (SharedStockGate) to SET this number at Head Office rather than add the difference.
+        await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryLog>().AddAsync(new AppleEsportsErp.Domain.Entities.InventoryLog
+        {
+            Id = Guid.NewGuid(),
+            InventoryId = item.Id,
+            BranchId = item.BranchId,
+            OperatorId = CurrentUserId() is { } uid && uid != Guid.Empty ? uid : (Guid?)null,
+            Action = "discrepancy",
+            Quantity = request.CurrentStock - item.CurrentStock,
+            OldValue = item.CurrentStock.ToString(),
+            NewValue = request.CurrentStock.ToString(),
+            Reason = "Stock count",
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+
         item.CurrentStock = request.CurrentStock;
         item.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -957,6 +973,7 @@ public class FoodGroupsController : ControllerBase
             Id = g.Id,
             Name = g.Name,
             CreatedAt = g.CreatedAt,
+            OfflineSellerBranchId = g.OfflineSellerBranchId,
             Branches = g.Branches
                 .OrderBy(b => b.Name)
                 .Select(b => new AppleEsportsErp.Application.DTOs.Settings.FoodGroupBranchDto { Id = b.Id, Name = b.Name })
@@ -1011,8 +1028,29 @@ public class FoodGroupsController : ControllerBase
             branchRepo.Update(b);
         }
 
+        if (group.OfflineSellerBranchId is { } seller && !branchIds.Contains(seller))
+            group.OfflineSellerBranchId = null;
+
         await _unitOfWork.SaveChangesAsync();
 
+        return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new { message = "Updated." }));
+    }
+
+    public record OfflineSellerRequest(Guid? BranchId);
+
+    /// <summary>Which member branch keeps selling the shared fridge when the internet is down -
+    /// every other branch in the group pauses shared items until it is back (SharedStockGate).</summary>
+    [HttpPut("{id}/offline-seller")]
+    public async Task<IActionResult> SetOfflineSeller(Guid id, [FromBody] OfflineSellerRequest request)
+    {
+        var group = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.FoodGroup>()
+            .Query().Include(g => g.Branches).FirstOrDefaultAsync(g => g.Id == id);
+        if (group == null) return NotFound(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Fail("Food group not found"));
+        if (request.BranchId is { } b && group.Branches.All(x => x.Id != b))
+            return BadRequest(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Fail("That branch is not in this group."));
+
+        group.OfflineSellerBranchId = request.BranchId;
+        await _unitOfWork.SaveChangesAsync();
         return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new { message = "Updated." }));
     }
 

@@ -4,9 +4,11 @@ import { ShoppingBasket, Plus, Minus } from 'lucide-react';
 import api from '../../config/api';
 import { useBranch } from '../../contexts/BranchContext';
 import { useToast } from '../ui/Toast';
+import { useStockVersion, SharedStockBanner } from '../food/SharedStockLive';
 
 export default function BillingAddItemsPanel({ bill, onOrderPlaced }) {
   const { activeBranch } = useBranch();
+  const stockVersion = useStockVersion();
   const toast = useToast();
   const navigate = useNavigate();
   
@@ -28,7 +30,7 @@ export default function BillingAddItemsPanel({ bill, onOrderPlaced }) {
       }
     };
     fetchInventory();
-  }, [activeBranch]);
+  }, [activeBranch, stockVersion]);
 
   // Clear cart if selected bill changes to prevent accidental wrong-bill orders
   useEffect(() => {
@@ -127,6 +129,7 @@ export default function BillingAddItemsPanel({ bill, onOrderPlaced }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
+        <SharedStockBanner />
         {loading ? (
           <div className="flex justify-center items-center h-full">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
