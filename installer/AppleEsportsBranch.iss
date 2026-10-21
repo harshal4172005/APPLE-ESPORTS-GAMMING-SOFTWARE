@@ -12,7 +12,7 @@
 ; ============================================================================
 
 #define AppName        "Apple Esports"
-#define AppVersion     "3.1.118"
+#define AppVersion     "3.1.120"
 #define AppPublisher   "Apple Esports"
 #define Staging        "branch\staging"
 
@@ -80,6 +80,7 @@ Source: "branch\apply-update.ps1"; DestDir: "{app}"; Components: core; Flags: ig
 ; "End Task" in particular. See restart-on-kill.ps1 for the full reasoning.
 Source: "branch\restart-on-kill.ps1"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "branch\setup-restart-on-kill.ps1"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "branch\setup-end-session-cleanup.ps1"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 ; The restart above already resumes the kiosk on its own - the [Registry] Run key below (and
 ; KioskGuard.EnsureStartsOnBoot's own repair of it) already relaunches AppleEsports.exe on
 ; every boot/logon, so there is nothing new to register here for that half of this feature.
@@ -183,6 +184,9 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -Executi
 ; anything about them (the auditing policy, the exe's own path) needs restoring.
 Filename: "powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\setup-restart-on-kill.ps1"" -AppExePath ""{app}\AppleEsports.exe"""; StatusMsg: "Setting up unexpected-close protection..."; Flags: runhidden waituntilterminated; Components: core
 
+; Lets the end-of-session cleanup close games that run as administrator (most of them).
+Filename: "powershell.exe"; Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\setup-end-session-cleanup.ps1"""; StatusMsg: "Setting up game closing at session end..."; Flags: runhidden waituntilterminated; Components: core
+
 Filename: "{app}\AppleEsports.exe"; Description: "Set up this PC now"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -197,6 +201,7 @@ Filename: "sc.exe"; Parameters: "delete AppleEsportsDb";  Flags: runhidden; RunO
 Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""AppleEsports Kiosk Guard"""; Flags: runhidden; RunOnceId: "DelKioskGuard"
 Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""AppleEsports Auto Update"""; Flags: runhidden; RunOnceId: "DelAutoUpdate"
 Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""AppleEsports Restart On Kill"""; Flags: runhidden; RunOnceId: "DelRestartOnKill"
+Filename: "schtasks.exe"; Parameters: "/Delete /F /TN ""AppleEsports End Session Cleanup"""; Flags: runhidden; RunOnceId: "DelEndSessionCleanup"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\AppleEsports"

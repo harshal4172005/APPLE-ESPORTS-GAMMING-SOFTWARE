@@ -14,9 +14,9 @@
          several releases where the other three version files (Api.csproj, Desktop.csproj,
          AppleEsportsBranch.iss) were correctly bumped and this one was not - a fourth file to
          remember, kept in step by hand same as the rest. -->
-    <Version>3.1.118</Version>
-    <FileVersion>3.1.118.0</FileVersion>
-    <AssemblyVersion>3.1.118.0</AssemblyVersion>
+    <Version>3.1.120</Version>
+    <FileVersion>3.1.120.0</FileVersion>
+    <AssemblyVersion>3.1.120.0</AssemblyVersion>
     <AssemblyName>AppleEsportsAgent</AssemblyName>
     <RootNamespace>AppleEsportsErp.ClientAgent</RootNamespace>
     <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
