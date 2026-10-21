@@ -50,7 +50,26 @@ $agentExe = Join-Path $agentDir 'publish\AppleEsportsAgent.exe'
 $agentDist = Join-Path $distDir "AppleEsportsAgent-$agentVersion.exe"
 Copy-Item $agentExe $agentDist -Force
 
-Write-Host "`n== 3. Compiling the installer ==" -ForegroundColor Cyan
+Write-Host "`n== 3. Microsoft prerequisites ==" -ForegroundColor Cyan
+# Bundled so a fresh PC installs them by itself (InstallPrerequisites in the .iss). Fetched
+# here rather than kept in git; each must carry Microsoft's own valid signature.
+$prereqDir = Join-Path $here 'prereqs'
+New-Item -ItemType Directory -Force $prereqDir | Out-Null
+$prereqs = @{
+    'vc_redist.x64.exe'              = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+    'MicrosoftEdgeWebview2Setup.exe' = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
+}
+foreach ($name in $prereqs.Keys) {
+    $file = Join-Path $prereqDir $name
+    if (-not (Test-Path $file)) { Invoke-WebRequest -Uri $prereqs[$name] -OutFile $file -UseBasicParsing }
+    $sig = Get-AuthenticodeSignature $file
+    if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+        Remove-Item $file -Force
+        throw "$name is not validly signed by Microsoft - refusing to bundle it"
+    }
+}
+
+Write-Host "`n== 4. Compiling the installer ==" -ForegroundColor Cyan
 New-Item -ItemType Directory -Force $distDir | Out-Null
 $iscc = Find-Iscc
 & $iscc (Join-Path $here 'AppleEsportsBranch.iss') |

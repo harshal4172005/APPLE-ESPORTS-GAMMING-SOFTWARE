@@ -69,3 +69,6 @@ dist/
 # Committing this once put 21,428 PostgreSQL files in a single commit.
 installer/branch/staging/
 installer/branch/.cache/
+
+# Microsoft prerequisites, downloaded by build-branch-installer.ps1
+installer/prereqs/

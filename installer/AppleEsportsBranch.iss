@@ -12,7 +12,7 @@
 ; ============================================================================
 
 #define AppName        "Apple Esports"
-#define AppVersion     "3.1.116"
+#define AppVersion     "3.1.118"
 #define AppPublisher   "Apple Esports"
 #define Staging        "branch\staging"
 
@@ -60,6 +60,10 @@ Name: "server"; Description: "Branch database and services"; Types: operator
 Name: "agent";  Description: "Gaming PC screen lock";        Types: gaming
 
 [Files]
+; Microsoft prerequisites, never copied to {app} - only unpacked and run by InstallPrerequisites.
+; build-branch-installer.ps1 downloads them into installer\prereqs.
+Source: "prereqs\vc_redist.x64.exe";              Flags: dontcopy
+Source: "prereqs\MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 ; -- Always --
 Source: "..\desktop-client\publish\AppleEsports.exe"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "..\SHORTCUT_KEYS.md";                        DestDir: "{app}"; Components: core; Flags: ignoreversion
@@ -266,11 +270,47 @@ end;
   with "DeleteFile failed; code 5" partway through and leaves the install half replaced.
   Stopping first is the difference between an upgrade over a working branch succeeding and
   needing a full uninstall. setup-api.ps1 starts everything again at the end. }
+{ Installs what a fresh Windows PC is missing, so nobody has to fetch anything by hand.
+
+  Visual C++ runtime: the branch database's own tools (pg_isready, initdb, postgres) are
+  native programs built against it; on a PC without it setup stopped at "Setting up the
+  branch database" with "VCRUNTIME140.dll was not found". Run every time, not only when a
+  registry check says it is missing: an older 2015-era runtime also reports "installed" yet
+  can be too old, and Microsoft's installer exits in seconds when nothing needs doing.
+
+  WebView2: what every Apple Esports screen runs inside. Usually already part of Windows 11;
+  the small online installer fetches it only when it is missing (needs internet). }
+procedure InstallPrerequisites();
+var
+  ResultCode: Integer;
+begin
+  ExtractTemporaryFile('vc_redist.x64.exe');
+  Exec(ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart', '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Log('Visual C++ runtime installer exited with ' + IntToStr(ResultCode) + ' (0, 1638 and 3010 all mean it is in place).');
+
+  if not WebView2Installed() then
+  begin
+    ExtractTemporaryFile('MicrosoftEdgeWebview2Setup.exe');
+    Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '',
+      SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('WebView2 installer exited with ' + IntToStr(ResultCode));
+
+    if not WebView2Installed() and not WizardSilent() then
+      MsgBox('Apple Esports could not install the Microsoft Edge WebView2 Runtime - this PC ' +
+        'probably has no internet right now. Setup will carry on, but the screens will not ' +
+        'open until it is installed: connect to the internet and run this setup again.',
+        mbInformation, MB_OK);
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
   Result := '';
+
+  InstallPrerequisites();
 
   { Also true when this machine already runs the branch, so a silent update given no
     component flags still restarts the services it has just stopped. }
@@ -285,26 +325,6 @@ begin
   Exec('powershell.exe',
     '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\stop-services.ps1') + '"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-end;
-
-function InitializeSetup(): Boolean;
-var
-  ErrorCode: Integer;
-begin
-  Result := True;
-
-  if not WebView2Installed() then
-  begin
-    if MsgBox(
-      'Apple Esports needs the Microsoft Edge WebView2 Runtime, which is not installed on this PC.' + #13#10#13#10 +
-      'It is a free Microsoft component and takes about a minute to install.' + #13#10#13#10 +
-      'Open the download page now? (Choose No to carry on installing anyway.)',
-      mbConfirmation, MB_YESNO) = IDYES then
-    begin
-      ShellExec('open', 'https://developer.microsoft.com/microsoft-edge/webview2/#download', '', '', SW_SHOW, ewNoWait, ErrorCode);
-      Result := False;
-    end;
-  end;
 end;
 
 { Runs a setup script and returns its exit code, so a failure can be reported rather
