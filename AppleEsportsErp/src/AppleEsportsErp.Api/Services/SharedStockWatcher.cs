@@ -57,8 +57,9 @@ public class SharedStockWatcher : BackgroundService
             {
                 // Every few minutes ask for every count again, so an item that only reached this
                 // branch's menu after its count last moved still picks up the right number.
-                if (DateTimeOffset.UtcNow >= fullRefreshAt)
+                if (DateTimeOffset.UtcNow >= fullRefreshAt || SharedStockGate.RefreshRequested)
                 {
+                    SharedStockGate.RefreshRequested = false;
                     since = 0;
                     fullRefreshAt = DateTimeOffset.UtcNow.AddMinutes(5);
                 }
@@ -144,8 +145,13 @@ public class SharedStockWatcher : BackgroundService
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var skipped = false;
             foreach (var c in counts)
             {
+                // This branch is saving this item right now and will write Head Office's answer
+                // itself - writing it here first is what made that save fail (SharedStockGate.InFlight).
+                if (SharedStockGate.IsInFlight(c.InventoryItemId)) { skipped = true; continue; }
+
                 var item = await db.InventoryItems.AsNoTracking().FirstOrDefaultAsync(i => i.Id == c.InventoryItemId, ct);
                 if (item is null || item.CurrentStock == c.Count) continue;
                 SharedStockGate.SetAvailability(item, c.Count);
@@ -160,6 +166,14 @@ public class SharedStockWatcher : BackgroundService
 
             await _foodHub.Clients.Group($"branch:{SharedStockGate.BranchId}").SendAsync("StockChanged", ct);
             await _overlayHub.Clients.All.SendAsync("StockChanged", ct);
+
+            // Something was left for a save in progress: look again in a moment, from the start,
+            // so a change from the other counter that arrived in the same batch is not lost.
+            if (skipped)
+            {
+                await Task.Delay(300, ct);
+                return 0;
+            }
         }
 
         return data.Version;

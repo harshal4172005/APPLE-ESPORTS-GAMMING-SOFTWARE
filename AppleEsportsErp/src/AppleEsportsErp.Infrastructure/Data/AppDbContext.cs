@@ -86,37 +86,94 @@ public class AppDbContext : DbContext
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         // Shared-fridge stock is asked of Head Office first - see SharedStockGate.
-        var applied = await SharedStockGate.ApplyAsync(this, cancellationToken);
+        var held = new List<Guid>();
+        var applied = new List<SharedStockGate.AppliedOp>();
         try
         {
+            applied = await SharedStockGate.ApplyAsync(this, held, cancellationToken);
             CaptureForSync();
-            var written = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
-            HoldOrForget(applied);
-            return written;
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    var written = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+                    HoldOrForget(applied);
+                    return written;
+                }
+                catch (DbUpdateConcurrencyException ex) when (IsSharedStockRace(ex, attempt))
+                {
+                    foreach (var entry in ex.Entries)
+                    {
+                        var current = await entry.GetDatabaseValuesAsync(cancellationToken);
+                        if (current is null) throw;
+                        entry.OriginalValues.SetValues(current);
+                    }
+                    SharedStockGate.RefreshRequested = true;
+                }
+            }
         }
         catch
         {
             await SharedStockGate.UndoAsync(applied);
             throw;
         }
+        finally
+        {
+            SharedStockGate.Release(held);
+        }
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        var applied = SharedStockGate.ApplyAsync(this, CancellationToken.None).GetAwaiter().GetResult();
+        var held = new List<Guid>();
+        var applied = new List<SharedStockGate.AppliedOp>();
         try
         {
+            applied = SharedStockGate.ApplyAsync(this, held, CancellationToken.None).GetAwaiter().GetResult();
             CaptureForSync();
-            var written = base.SaveChanges(acceptAllChangesOnSuccess);
-            HoldOrForget(applied);
-            return written;
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    var written = base.SaveChanges(acceptAllChangesOnSuccess);
+                    HoldOrForget(applied);
+                    return written;
+                }
+                catch (DbUpdateConcurrencyException ex) when (IsSharedStockRace(ex, attempt))
+                {
+                    foreach (var entry in ex.Entries)
+                    {
+                        var current = entry.GetDatabaseValues();
+                        if (current is null) throw;
+                        entry.OriginalValues.SetValues(current);
+                    }
+                    SharedStockGate.RefreshRequested = true;
+                }
+            }
         }
         catch
         {
             SharedStockGate.UndoAsync(applied).GetAwaiter().GetResult();
             throw;
         }
+        finally
+        {
+            SharedStockGate.Release(held);
+        }
     }
+
+    /// <summary>
+    /// A shared-fridge branch's stock row was rewritten by SharedStockWatcher (the other counter's
+    /// sale arriving) between this save reading it and writing it. Head Office already decided
+    /// this save's numbers, so it is written over the newer row rather than failed, and the
+    /// watcher re-reads every count straight after. Only ever for stock rows, only in a group,
+    /// at most twice - anything else is a genuine conflict and still refused.
+    /// </summary>
+    private static bool IsSharedStockRace(DbUpdateConcurrencyException ex, int attempt) =>
+        attempt < 3
+        && SharedStockGate.Membership is not null
+        && ex.Entries.Count > 0
+        && ex.Entries.All(e => e.Entity is InventoryItem);
 
     /// <summary>
     /// Shared-stock changes Head Office applied for a save inside a transaction that has not

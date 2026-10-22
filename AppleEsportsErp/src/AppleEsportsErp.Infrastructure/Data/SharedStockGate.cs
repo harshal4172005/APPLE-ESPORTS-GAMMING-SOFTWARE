@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
@@ -55,8 +56,38 @@ public static class SharedStockGate
     public sealed record Answer(Outcome Outcome, int Count = 0, string? Reason = null);
     internal sealed record AppliedOp(Guid ItemId, string Op, int Quantity, int Before);
 
-    /// <summary>Runs inside SaveChangesAsync, before anything is written.</summary>
-    internal static async Task<List<AppliedOp>> ApplyAsync(AppDbContext db, CancellationToken ct)
+    // Items this branch is in the middle of saving. Head Office pushes every change straight
+    // back to every branch in the group - including the one that made it - and the watcher
+    // writing that echo into the row a few milliseconds before this branch's own save made the
+    // save fail (InventoryItem is xmin-protected): 22 Oct, every stock count at Citylight-144Hz
+    // refused, 7 of 10 orders in the reproduction. The watcher leaves held items alone
+    // (SharedStockWatcher); the save itself writes Head Office's answer for them anyway.
+    private static readonly ConcurrentDictionary<Guid, int> InFlight = new();
+    public static bool IsInFlight(Guid itemId) => InFlight.ContainsKey(itemId);
+
+    /// <summary>Set when a save had to overwrite a newer mirror value; the watcher re-reads everything.</summary>
+    public static volatile bool RefreshRequested;
+
+    private static void Hold(Guid itemId) => InFlight.AddOrUpdate(itemId, 1, (_, n) => n + 1);
+
+    internal static void Release(List<Guid> held)
+    {
+        foreach (var id in held)
+        {
+            while (InFlight.TryGetValue(id, out var n))
+            {
+                var done = n <= 1
+                    ? InFlight.TryRemove(new KeyValuePair<Guid, int>(id, n))
+                    : InFlight.TryUpdate(id, n - 1, n);
+                if (done) break;
+            }
+        }
+        held.Clear();
+    }
+
+    /// <summary>Runs inside SaveChangesAsync, before anything is written. Every item it asks Head
+    /// Office about is added to <paramref name="held"/>, which the caller releases after its save.</summary>
+    internal static async Task<List<AppliedOp>> ApplyAsync(AppDbContext db, List<Guid> held, CancellationToken ct)
     {
         var applied = new List<AppliedOp>();
         var m = Membership;
@@ -84,6 +115,8 @@ public static class SharedStockGate
                 : after < before ? ("take", before - after)
                 : ("add", after - before);
 
+            Hold(entry.Entity.Id);
+            held.Add(entry.Entity.Id);
             var answer = await SendAsync(Guid.NewGuid(), entry.Entity.Id, op, qty, before, replay: false, ct);
 
             if (answer.Outcome == Outcome.Applied)
