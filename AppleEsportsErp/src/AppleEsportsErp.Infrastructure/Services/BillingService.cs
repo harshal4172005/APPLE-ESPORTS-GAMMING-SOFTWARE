@@ -339,7 +339,8 @@ public class BillingService : IBillingService
     /// own CashTransaction. That original row is left untouched deliberately: it is what that
     /// day's (possibly already-closed, already-reported) register actually recorded at the time,
     /// and rewriting it would silently change a day's numbers that may have already been handed
-    /// over and signed off. The correction belongs to today, because today is when it happened.
+    /// over and signed off. The delta moves the open drawer only when the bill was paid into that
+    /// same drawer; a bill from an earlier, already-counted drawer leaves today's drawer alone.
     /// </summary>
     public async Task<BillDto> EditPaymentMethodAsync(
         Guid branchId, Guid actorId, string actorRole, Guid id, EditPaymentMethodDto dto)
@@ -411,6 +412,8 @@ public class BillingService : IBillingService
         // Every non-wallet Payment tied to this bill (in practice always exactly one - a
         // Completed bill can only be paid once) is corrected the same way as the Bill itself.
         var nonWalletPayments = bill.Payments.Where(p => p.WalletAmount == 0).ToList();
+        // When the money was actually taken - read before anything below touches the bill.
+        var paidAt = nonWalletPayments.FirstOrDefault()?.CreatedAt ?? bill.CompletedAt ?? bill.CreatedAt;
         if (nonWalletPayments.Count == 1)
         {
             var payment = nonWalletPayments[0];
@@ -448,6 +451,14 @@ public class BillingService : IBillingService
         {
             activeRegister = await _unitOfWork.Repository<CashRegister>().Query()
                 .FirstOrDefaultAsync(cr => cr.BranchId == branchId && cr.Status == CashRegisterStatus.Open);
+
+            // Only the drawer the bill was paid into moves. A bill from an earlier shift was paid
+            // into a drawer that is already counted and closed - taking the difference out of
+            // today's drawer made today's count wrong by exactly that amount (Citylight, 25 Oct:
+            // fifteen of 24 Oct's bills corrected Cash -> Online left the morning drawer Rs 1,090
+            // "over"). Nothing replaces it: the bill and End of Day's Cash/Online still change.
+            if (activeRegister != null && paidAt < activeRegister.OpenedAt)
+                activeRegister = null;
 
             if (activeRegister != null)
             {
