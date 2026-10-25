@@ -606,14 +606,20 @@ export default function EodDashboardPage() {
 
       {/* Operator's own summary - the detailed Revenue/Credit grid further down is hidden from
           them (owner's own instruction), so this stands in with just the drawer-facing totals:
-          same Cash/Online/Food figures, same Overall End Total math as EodPaymentSummaryBar.jsx. */}
-      {user?.role === 'operator' && report && !isRange && (() => {
+          same Cash/Online/Food figures, same Overall End Total math as EodPaymentSummaryBar.jsx.
+          Shown to Admin and Super Admin too (owner's instruction), labelled, so they can check
+          exactly what the operator was shown. */}
+      {report && !isRange && (() => {
         const cashTotal = Number(report.paymentMethods.totalCash) + Number(report.paymentMethods.totalWalletTopUpsCash);
         const onlineTotal = Number(report.paymentMethods.totalOnline) + Number(report.paymentMethods.totalWalletTopUpsOnline);
         const grandTotal = cashTotal + onlineTotal
           - Number(report.cash.totalPettyExpenses) + Number(report.cash.totalCashInwards)
           - Number(report.cash.totalOwnerWithdrawals);
         return (
+          <div>
+          {user?.role !== 'operator' && (
+            <div className="text-text-3 text-[11px] uppercase font-bold tracking-widest mb-2">What the operator sees</div>
+          )}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
               <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Total</div>
@@ -631,6 +637,7 @@ export default function EodDashboardPage() {
               <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Food</div>
               <div className="text-2xl font-mono font-bold text-text">₹{report.revenue.totalFoodRevenue}</div>
             </div>
+          </div>
           </div>
         );
       })()}
