@@ -12,7 +12,7 @@ export default function PricingProfilesTab() {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [drawer, setDrawer] = useState({ isOpen: false, data: null });
-  const [packageForm, setPackageForm] = useState({ id: null, name: '', durationMinutes: '', price: '' });
+  const [packageForm, setPackageForm] = useState({ id: null, name: '', durationMinutes: '', price: '', fromMinutes: '' });
 
   // Initially select first branch if none selected
   useEffect(() => {
@@ -93,11 +93,12 @@ export default function PricingProfilesTab() {
     }
   };
 
-  const resetPackageForm = () => setPackageForm({ id: null, name: '', durationMinutes: '', price: '' });
+  const resetPackageForm = () => setPackageForm({ id: null, name: '', durationMinutes: '', price: '', fromMinutes: '' });
 
   const handlePackageSubmit = async (e) => {
     e.preventDefault();
     if (!packageForm.name || !packageForm.durationMinutes || packageForm.price === '') return;
+    const fromMin = packageForm.fromMinutes === '' ? null : Number(packageForm.fromMinutes);
 
     try {
       if (packageForm.id) {
@@ -106,6 +107,7 @@ export default function PricingProfilesTab() {
           durationMinutes: Number(packageForm.durationMinutes),
           price: Number(packageForm.price),
           sortOrder: Number(packageForm.durationMinutes),
+          packagePriceFromMin: fromMin,
           isActive: true
         });
         toast.success('Package updated');
@@ -115,7 +117,8 @@ export default function PricingProfilesTab() {
           name: packageForm.name,
           durationMinutes: Number(packageForm.durationMinutes),
           price: Number(packageForm.price),
-          sortOrder: Number(packageForm.durationMinutes)
+          sortOrder: Number(packageForm.durationMinutes),
+          packagePriceFromMin: fromMin
         });
         toast.success('Package added');
       }
@@ -127,7 +130,7 @@ export default function PricingProfilesTab() {
   };
 
   const handleEditPackage = (pkg) => {
-    setPackageForm({ id: pkg.id, name: pkg.name, durationMinutes: pkg.durationMinutes, price: pkg.price });
+    setPackageForm({ id: pkg.id, name: pkg.name, durationMinutes: pkg.durationMinutes, price: pkg.price, fromMinutes: pkg.packagePriceFromMin ?? '' });
   };
 
   const handleDeletePackage = async (pkg) => {
@@ -213,7 +216,9 @@ export default function PricingProfilesTab() {
                   {drawer.data.packages.map(pkg => (
                     <div key={pkg.id} className="flex items-center justify-between bg-bg-3 border border-border rounded px-2 py-1.5 text-xs">
                       <span className="text-text">{pkg.name}</span>
-                      <span className="text-text-2 font-mono">{pkg.durationMinutes}m</span>
+                      <span className="text-text-2 font-mono">
+                        {pkg.durationMinutes}m{pkg.packagePriceFromMin ? ` (from ${pkg.packagePriceFromMin}m)` : ''}
+                      </span>
                       <span className="text-accent font-mono">₹{Number(pkg.price).toFixed(2)}</span>
                       <div className="flex gap-1.5">
                         <button type="button" onClick={() => handleEditPackage(pkg)} className="btn-icon" title="Edit package">
@@ -258,6 +263,19 @@ export default function PricingProfilesTab() {
                       value={packageForm.price}
                       onChange={(e) => setPackageForm(f => ({ ...f, price: e.target.value }))}
                     />
+                  </div>
+                  <div className="form-group col-span-3">
+                    <label>Package price from (minutes played)</label>
+                    <input
+                      type="number" min="1" step="1"
+                      className="form-control"
+                      placeholder={packageForm.durationMinutes ? `Empty = from ${Math.max(1, packageForm.durationMinutes - (drawer.data.bufferMinutes ?? 10))} min` : 'e.g. 210 for 3 hr 30 min'}
+                      value={packageForm.fromMinutes}
+                      onChange={(e) => setPackageForm(f => ({ ...f, fromMinutes: e.target.value }))}
+                    />
+                    <span className="text-[10px] text-text-3">
+                      Played less than this is charged by the hour. Customers never see it - they only see the package.
+                    </span>
                   </div>
                 </div>
                 <div className="flex gap-2 mt-2">

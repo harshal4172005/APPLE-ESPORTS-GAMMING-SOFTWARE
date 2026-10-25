@@ -2175,6 +2175,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.Property<Guid?>("CurrentSessionId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("CurrentSessionPackageFromMin")
+                        .HasColumnType("integer");
+
                     b.Property<decimal?>("CurrentSessionPackagePrice")
                         .HasColumnType("numeric");
 
@@ -2299,6 +2302,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("PackagePriceFromMin")
+                        .HasColumnType("integer");
 
                     b.Property<decimal>("Price")
                         .HasColumnType("numeric");
@@ -2531,6 +2537,12 @@ namespace AppleEsportsErp.Infrastructure.Migrations
 
                     b.Property<Guid>("OperatorId")
                         .HasColumnType("uuid");
+
+                    b.Property<int?>("PackageFromMin")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("PackageMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<decimal?>("PackagePrice")
                         .HasColumnType("numeric");

@@ -32,7 +32,8 @@ public class SessionControlService
 
             _lockScreen.UnlockPc(duration, customerName, new Views.SessionPricingInfo(
                 command?.PackagePrice, command?.PlannedDurationMin, command?.PackageName,
-                command?.RatePerHour ?? 0m, command?.BufferMinutes ?? 0, command?.SessionStartUtc));
+                command?.RatePerHour ?? 0m, command?.BufferMinutes ?? 0, command?.SessionStartUtc,
+                command?.PackageFromMin));
         }
         catch
         {
@@ -81,6 +82,7 @@ internal class UnlockCommand
     /// Session Pricing PRD's issue 07 - this PC used to show a countdown and nothing else.</summary>
     public decimal? PackagePrice { get; set; }
     public int? PlannedDurationMin { get; set; }
+    public int? PackageFromMin { get; set; }
     public string? PackageName { get; set; }
     public decimal RatePerHour { get; set; }
     public int BufferMinutes { get; set; }

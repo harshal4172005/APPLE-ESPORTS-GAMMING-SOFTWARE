@@ -143,7 +143,7 @@ public class PcStatusService : IPcStatusService
                     decimal elapsedMinutes = SessionTimeCalculator.ElapsedMinutes(
                         session.StartTime, session.PausedSeconds, now);
                     decimal liveGamingAmount = SessionPricingCalculator.CalculateLiveGamingAmount(
-                        session.PackagePrice, session.PlannedDurationMin, calculatedRate, bufferMinutes, elapsedMinutes);
+                        session.PackagePrice, session.PackageMinutes ?? session.PlannedDurationMin, calculatedRate, bufferMinutes, elapsedMinutes, session.PackageFromMin);
                     dto.TotalAmount = liveGamingAmount + session.FoodAmount;
                 }
                 else
@@ -179,7 +179,7 @@ public class PcStatusService : IPcStatusService
                     // Head Office has no local Session row to read this from directly.
                     dto.TotalAmount = SessionPricingCalculator.CalculateLiveGamingAmount(
                         pc.CurrentSessionPackagePrice, pc.CurrentSessionPlannedDurationMin,
-                        calculatedRate, bufferMinutes, elapsedMinutes);
+                        calculatedRate, bufferMinutes, elapsedMinutes, pc.CurrentSessionPackageFromMin);
                 }
             }
             else if (recentCompletedSessions.TryGetValue(pc.Id, out var lastSession) && lastSession != null)

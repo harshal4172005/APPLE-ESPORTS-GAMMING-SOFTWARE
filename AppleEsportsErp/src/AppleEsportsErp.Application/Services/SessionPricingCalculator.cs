@@ -55,9 +55,12 @@ public static class SessionPricingCalculator
     /// Explicit owner instruction: a 1 hr (₹50) session stopped at 45 minutes must bill what 45
     /// minutes actually costs, not the full ₹50 a customer who never got the full hour never used.
     /// </summary>
+    /// <paramref name="packageFromMin"/> is the package's own "package price from" setting
+    /// (owner, 25 Oct 2026: 4 hr / Rs 200 from 3 hr 30 min). Null keeps the old edge,
+    /// (planned - buffer). Played past the package, the extra minutes are hourly on top.
     public static decimal CalculateLiveGamingAmount(
         decimal? packagePrice, int? plannedDurationMin,
-        decimal ratePerHour, int bufferMinutes, decimal elapsedMinutes)
+        decimal ratePerHour, int bufferMinutes, decimal elapsedMinutes, int? packageFromMin = null)
     {
         if (elapsedMinutes <= bufferMinutes)
             return 0m;
@@ -68,7 +71,7 @@ public static class SessionPricingCalculator
 
             // Stopped well short of the planned time - the package was never actually used, so
             // there's nothing to honor. Bills exactly like Pay-As-You-Go for the time really played.
-            if (overrunMinutes < -bufferMinutes)
+            if (elapsedMinutes < (packageFromMin ?? plannedDurationMin.Value - bufferMinutes))
                 return CalculateGamingAmount(ratePerHour, bufferMinutes, elapsedMinutes);
 
             return overrunMinutes <= bufferMinutes

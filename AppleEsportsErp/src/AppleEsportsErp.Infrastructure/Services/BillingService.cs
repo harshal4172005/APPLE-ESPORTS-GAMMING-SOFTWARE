@@ -157,7 +157,7 @@ public class BillingService : IBillingService
             // way the final Stop bill would, instead of a flat hourly number nobody is really
             // being charged.
             decimal liveGamingAmount = Application.Services.SessionPricingCalculator.CalculateLiveGamingAmount(
-                bill.Session.PackagePrice, bill.Session.PlannedDurationMin, ratePerHour, bufferMinutes, elapsedMinutes);
+                bill.Session.PackagePrice, bill.Session.PackageMinutes ?? bill.Session.PlannedDurationMin, ratePerHour, bufferMinutes, elapsedMinutes, bill.Session.PackageFromMin);
 
             // The sticker price first — what the customer sees with no discount — THEN the
             // discount comes off that. See ApplyDiscountAsync for why: rounding the raw
@@ -237,7 +237,7 @@ public class BillingService : IBillingService
             // must come off the package's real price (plus any overrun), not off a plain
             // hours x BaseHourlyRate figure that was never the customer's actual charge.
             rawGaming = Application.Services.SessionPricingCalculator.CalculateLiveGamingAmount(
-                bill.Session.PackagePrice, bill.Session.PlannedDurationMin, ratePerHour, bufferMinutes, elapsedMinutes);
+                bill.Session.PackagePrice, bill.Session.PackageMinutes ?? bill.Session.PlannedDurationMin, ratePerHour, bufferMinutes, elapsedMinutes, bill.Session.PackageFromMin);
         }
 
         var (stickerGaming, stickerFood, preDiscountTotal) = Application.Services.SessionPricingCalculator.ComputeRoundedBreakdown(

@@ -65,6 +65,15 @@ public class Session
     /// </summary>
     public decimal? PackagePrice { get; set; }
 
+    /// <summary>
+    /// The package as it was sold at Start, copied so a later Settings change can't reprice a
+    /// running session. Set only on sessions started from 3.1.134 on, and when set PackagePrice
+    /// stays the package's own price: extensions only move the timer, and the time played past
+    /// PackageMinutes is billed at the hourly rate. Null = the old rule (see PackagePrice).
+    /// </summary>
+    public int? PackageMinutes { get; set; }
+    public int? PackageFromMin { get; set; }
+
     // State
     public SessionState State { get; set; } = SessionState.Active;
     public string GamingType { get; set; } = "standard";

@@ -86,6 +86,7 @@ public class PcStateDto
     /// Pc.CurrentSessionPackagePrice for why Head Office needs this snapshot at all.</summary>
     public decimal? SessionPackagePrice { get; set; }
     public int? SessionPlannedDurationMin { get; set; }
+    public int? SessionPackageFromMin { get; set; }
 
     /// <summary>
     /// True if PcStatusHub's shutdown command was sent to this PC and it has not reconnected

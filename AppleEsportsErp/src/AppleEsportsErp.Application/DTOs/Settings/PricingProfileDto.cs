@@ -27,6 +27,7 @@ public class PricingPackageDto
     public string Name { get; set; } = null!;
     public int DurationMinutes { get; set; }
     public decimal Price { get; set; }
+    public int? PackagePriceFromMin { get; set; }
     public int SortOrder { get; set; }
     public bool IsActive { get; set; }
 }
@@ -37,6 +38,7 @@ public class CreatePricingPackageDto
     public string Name { get; set; } = null!;
     public int DurationMinutes { get; set; }
     public decimal Price { get; set; }
+    public int? PackagePriceFromMin { get; set; }
     public int SortOrder { get; set; }
 }
 
@@ -45,6 +47,7 @@ public class UpdatePricingPackageDto
     public string Name { get; set; } = null!;
     public int DurationMinutes { get; set; }
     public decimal Price { get; set; }
+    public int? PackagePriceFromMin { get; set; }
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
 }

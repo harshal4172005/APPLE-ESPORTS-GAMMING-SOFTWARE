@@ -57,8 +57,18 @@ public class PricingProfileService : IPricingProfileService
         DurationMinutes = pkg.DurationMinutes,
         Price = pkg.Price,
         SortOrder = pkg.SortOrder,
-        IsActive = pkg.IsActive
+        IsActive = pkg.IsActive,
+        PackagePriceFromMin = pkg.PackagePriceFromMin
     };
+
+    /// <summary>"Package price from" has to sit inside the package: 4 hr from 3 hr 30 is fine,
+    /// from 0 or from 5 hr is a typo that would quietly reprice every session.</summary>
+    private static int? CheckFromMin(int? fromMin, int durationMinutes)
+    {
+        if (fromMin is { } m && (m <= 0 || m > durationMinutes))
+            throw new AppException($"\"Package price from\" must be between 1 and {durationMinutes} minutes.");
+        return fromMin;
+    }
 
     public async Task<PricingProfileDto> CreateAsync(CreatePricingProfileDto dto)
     {
@@ -128,6 +138,7 @@ public class PricingProfileService : IPricingProfileService
             DurationMinutes = dto.DurationMinutes,
             Price = dto.Price,
             SortOrder = dto.SortOrder,
+            PackagePriceFromMin = CheckFromMin(dto.PackagePriceFromMin, dto.DurationMinutes),
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -151,6 +162,7 @@ public class PricingProfileService : IPricingProfileService
         package.DurationMinutes = dto.DurationMinutes;
         package.Price = dto.Price;
         package.SortOrder = dto.SortOrder;
+        package.PackagePriceFromMin = CheckFromMin(dto.PackagePriceFromMin, dto.DurationMinutes);
         package.IsActive = dto.IsActive;
         package.UpdatedAt = DateTimeOffset.UtcNow;
 

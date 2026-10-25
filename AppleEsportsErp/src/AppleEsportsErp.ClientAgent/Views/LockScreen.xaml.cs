@@ -18,7 +18,7 @@ namespace AppleEsportsErp.ClientAgent.Views;
 /// </summary>
 public sealed record SessionPricingInfo(
     decimal? PackagePrice, int? PlannedDurationMin, string? PackageName,
-    decimal RatePerHour, int BufferMinutes, DateTimeOffset? SessionStartUtc)
+    decimal RatePerHour, int BufferMinutes, DateTimeOffset? SessionStartUtc, int? PackageFromMin = null)
 {
     public static readonly SessionPricingInfo None = new(null, null, null, 0m, 0, null);
 
@@ -34,7 +34,7 @@ public sealed record SessionPricingInfo(
         if (PackagePrice.HasValue && PlannedDurationMin.HasValue)
         {
             decimal overrunMinutes = elapsedMinutes - PlannedDurationMin.Value;
-            if (overrunMinutes < -BufferMinutes) return Math.Round((elapsedMinutes / 60m) * RatePerHour, 2);
+            if (elapsedMinutes < (PackageFromMin ?? PlannedDurationMin.Value - BufferMinutes)) return Math.Round((elapsedMinutes / 60m) * RatePerHour, 2);
             if (overrunMinutes <= BufferMinutes) return PackagePrice.Value;
             return PackagePrice.Value + Math.Round((overrunMinutes / 60m) * RatePerHour, 2);
         }

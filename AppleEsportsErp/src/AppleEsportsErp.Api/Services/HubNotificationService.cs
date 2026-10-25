@@ -176,7 +176,8 @@ public class HubNotificationService : IHubNotificationService
     public async Task SendUnlockCommandToAgentAsync(
         Guid pcId, int durationMinutes, string? customerName,
         decimal? packagePrice = null, int? plannedDurationMin = null, string? packageName = null,
-        decimal ratePerHour = 0m, int bufferMinutes = 0, DateTimeOffset? sessionStartUtc = null)
+        decimal ratePerHour = 0m, int bufferMinutes = 0, DateTimeOffset? sessionStartUtc = null,
+        int? packageFromMin = null)
     {
         await _pcStatusHub.Clients.Group($"agent:{pcId}").SendAsync("UnlockSession", new
         {
@@ -184,6 +185,7 @@ public class HubNotificationService : IHubNotificationService
             CustomerName = customerName,
             PackagePrice = packagePrice,
             PlannedDurationMin = plannedDurationMin,
+            PackageFromMin = packageFromMin,
             PackageName = packageName,
             RatePerHour = ratePerHour,
             BufferMinutes = bufferMinutes,

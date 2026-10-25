@@ -521,6 +521,7 @@ public class BranchHeartbeatController : ControllerBase
                         DurationMinutes = pkg.DurationMinutes,
                         Price = pkg.Price,
                         SortOrder = pkg.SortOrder,
+                        PackagePriceFromMin = pkg.PackagePriceFromMin,
                         IsActive = pkg.IsActive,
                     }).ToList(),
             })
@@ -596,7 +597,7 @@ public class BranchHeartbeatController : ControllerBase
         var pricingPart = string.Join('\n', config.PricingProfiles.Select(p => string.Join("",
             p.Id, p.Name, p.BaseHourlyRate, p.BufferMinutes, p.IsActive, p.RefreshRate, p.SystemSpecs,
             string.Join('|', p.Packages.Select(pkg => string.Join(',',
-                pkg.Id, pkg.Name, pkg.DurationMinutes, pkg.Price, pkg.SortOrder, pkg.IsActive))))));
+                pkg.Id, pkg.Name, pkg.DurationMinutes, pkg.Price, pkg.SortOrder, pkg.IsActive, pkg.PackagePriceFromMin))))));
 
         var adminsPart = string.Join('\n', config.Admins.Select(a => string.Join("",
             a.Id, a.FullName, a.Email, a.PasswordHash, a.AccessPin, a.DashboardPermissions, a.IsBlocked)));
@@ -734,6 +735,7 @@ public class BranchHeartbeatController : ControllerBase
                 && pc.CurrentSessionEndTime == reported.SessionEndTime
                 && pc.CurrentSessionPackagePrice == reported.SessionPackagePrice
                 && pc.CurrentSessionPlannedDurationMin == reported.SessionPlannedDurationMin
+                && pc.CurrentSessionPackageFromMin == reported.SessionPackageFromMin
                 && pc.PoweredOff == reported.PoweredOff)
                 continue;
 
@@ -767,6 +769,7 @@ public class BranchHeartbeatController : ControllerBase
             pc.CurrentSessionEndTime = reported.SessionEndTime;
             pc.CurrentSessionPackagePrice = reported.SessionPackagePrice;
             pc.CurrentSessionPlannedDurationMin = reported.SessionPlannedDurationMin;
+            pc.CurrentSessionPackageFromMin = reported.SessionPackageFromMin;
             pc.PoweredOff = reported.PoweredOff;
             pc.LastActiveAt = DateTimeOffset.UtcNow;
             pc.UpdatedAt = DateTimeOffset.UtcNow;

@@ -37,6 +37,15 @@ public class PricingPackage
     public decimal Price { get; set; }
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Played this many minutes or more, the customer pays the package price; less, the hourly
+    /// rate. Owner's rule (25 Oct 2026): the 4 hr / Rs 200 package is Rs 200 from 3 hr 30 min
+    /// (210). Null keeps the old rule - package price from (duration - buffer). Settings only,
+    /// never shown to customers.
+    /// </summary>
+    public int? PackagePriceFromMin { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 

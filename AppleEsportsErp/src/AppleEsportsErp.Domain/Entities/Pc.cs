@@ -48,6 +48,7 @@ public class Pc
     /// </summary>
     public decimal? CurrentSessionPackagePrice { get; set; }
     public int? CurrentSessionPlannedDurationMin { get; set; }
+    public int? CurrentSessionPackageFromMin { get; set; }
 
     public Guid? CurrentReservationId { get; set; }
     public DateTimeOffset? LastActiveAt { get; set; }

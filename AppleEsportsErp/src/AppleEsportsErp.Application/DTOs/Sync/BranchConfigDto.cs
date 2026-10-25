@@ -224,6 +224,7 @@ public class BranchPricingPackageConfigDto
     public string Name { get; set; } = string.Empty;
     public int DurationMinutes { get; set; }
     public decimal Price { get; set; }
+    public int? PackagePriceFromMin { get; set; }
     public int SortOrder { get; set; }
     public bool IsActive { get; set; }
 }

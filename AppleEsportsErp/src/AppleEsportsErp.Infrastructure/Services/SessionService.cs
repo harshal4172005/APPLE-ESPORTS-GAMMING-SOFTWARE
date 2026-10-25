@@ -295,6 +295,8 @@ public class SessionService : ISessionService
                 // same as before this field existed.
                 PricingPackageId = matchingPackage?.Id,
                 PackagePrice = matchingPackage?.Price,
+                PackageMinutes = matchingPackage?.DurationMinutes,
+                PackageFromMin = matchingPackage?.PackagePriceFromMin,
                 GamingType = dto.PackageName,
                 State = SessionState.Active,
                 Notes = dto.Notes,
@@ -398,7 +400,8 @@ public class SessionService : ISessionService
                 .FirstOrDefaultAsync(pp => pp.Id == pc.PricingProfileId);
             await _hubNotifier.SendUnlockCommandToAgentAsync(
                 pc.Id, (int)dto.DurationMinutes, dto.CustomerName,
-                packagePrice: session.PackagePrice, plannedDurationMin: session.PlannedDurationMin,
+                packagePrice: session.PackagePrice, plannedDurationMin: session.PackageMinutes ?? session.PlannedDurationMin,
+                    packageFromMin: session.PackageFromMin,
                 packageName: matchingPackage?.Name, ratePerHour: agentPricingProfile?.BaseHourlyRate ?? 0m,
                 bufferMinutes: agentPricingProfile?.BufferMinutes ?? SessionPricingCalculator.DefaultBufferMinutes,
                 sessionStartUtc: session.StartTime);
@@ -506,16 +509,20 @@ public class SessionService : ISessionService
             var packagePrice = session.PackagePrice;
             if (!packagePrice.HasValue && session.PlannedDurationMin is > 0 && session.Pc?.PricingProfileId is { } profileId)
             {
-                packagePrice = await _db.Set<PricingPackage>().AsNoTracking()
+                var found = await _db.Set<PricingPackage>().AsNoTracking()
                     .Where(pkg => pkg.PricingProfileId == profileId
                         && pkg.IsActive && pkg.DurationMinutes == session.PlannedDurationMin.Value)
                     .OrderBy(pkg => pkg.SortOrder)
-                    .Select(pkg => (decimal?)pkg.Price)
                     .FirstOrDefaultAsync();
 
                 // Found it - honor it exactly as if Start had captured it, so this session's
                 // own record stops disagreeing with itself the next time anything reads it.
-                if (packagePrice.HasValue) session.PackagePrice = packagePrice;
+                if (found != null)
+                {
+                    packagePrice = session.PackagePrice = found.Price;
+                    session.PackageMinutes = found.DurationMinutes;
+                    session.PackageFromMin = found.PackagePriceFromMin;
+                }
             }
 
             // Now the same shared call every live-amount screen uses too (see
@@ -523,8 +530,8 @@ public class SessionService : ISessionService
             // got the package-vs-hourly branching right; it now just calls the version of
             // itself every other screen calls, instead of keeping its own private copy of it.
             session.GamingAmount = SessionPricingCalculator.CalculateLiveGamingAmount(
-                packagePrice, session.PlannedDurationMin,
-                ratePerHour, bufferMinutes, session.ActualDurationMin!.Value);
+                packagePrice, session.PackageMinutes ?? session.PlannedDurationMin,
+                ratePerHour, bufferMinutes, session.ActualDurationMin!.Value, session.PackageFromMin);
 
             if (session.ActualDurationMin <= bufferMinutes)
             {
@@ -564,6 +571,9 @@ public class SessionService : ISessionService
                     gamingItem.ItemName = session.PlannedDurationMin == null ? $"Open Session ({session.ActualDurationMin}m)" : $"{session.GamingType}";
                     gamingItem.TotalPrice = displayGaming;
                     gamingItem.UnitPrice = displayGaming;
+
+                    if (session.PackageMinutes is { } packageMinutes && packagePrice is { } price)
+                        SplitPackageBillLines(bill, gamingItem, session, packageMinutes, price, displayGaming, bufferMinutes, now);
                 }
             }
 
@@ -836,7 +846,8 @@ public class SessionService : ISessionService
                     .FirstOrDefaultAsync(pp => pp.Id == pc.PricingProfileId);
                 await _hubNotifier.SendUnlockCommandToAgentAsync(
                     pc.Id, remaining, session.CustomerName ?? "Guest",
-                    packagePrice: session.PackagePrice, plannedDurationMin: session.PlannedDurationMin,
+                    packagePrice: session.PackagePrice, plannedDurationMin: session.PackageMinutes ?? session.PlannedDurationMin,
+                    packageFromMin: session.PackageFromMin,
                     ratePerHour: resumePricingProfile?.BaseHourlyRate ?? 0m,
                     bufferMinutes: resumePricingProfile?.BufferMinutes ?? SessionPricingCalculator.DefaultBufferMinutes,
                     sessionStartUtc: session.StartTime);
@@ -874,6 +885,55 @@ public class SessionService : ISessionService
             await LogSessionFailureAsync(branchId, operatorId, AuditActions.SessionResume, sessionId, ex);
             throw;
         }
+    }
+
+    /// <summary>
+    /// A package session's bill as the customer should read it: the package at its own price,
+    /// then "Extra time 48m" for what was played past it - not "4 hr + Extension - 60m Rs 290"
+    /// next to a separate "Extension - 60m Rs 60" that the total never included. Stopped
+    /// before the package price applies, one line says it was charged by the hour.
+    /// </summary>
+    private void SplitPackageBillLines(Bill bill, BillItem gamingItem, Session session,
+        int packageMinutes, decimal packagePrice, decimal displayGaming, int bufferMinutes, DateTimeOffset now)
+    {
+        // The extension lines were what was promised when it was added; the real figure is below.
+        foreach (var extension in bill.Items.Where(i => i.ItemType == "gaming" && i != gamingItem).ToList())
+        {
+            bill.Items.Remove(extension);
+            _uow.Repository<BillItem>().Remove(extension);
+        }
+
+        var played = session.ActualDurationMin ?? 0;
+        if (played <= bufferMinutes) return;   // cancelled - keeps its "(Cancelled ...)" line
+
+        var packageName = session.GamingType.Split(" + ")[0];
+        if (played < (session.PackageFromMin ?? packageMinutes - bufferMinutes))
+        {
+            gamingItem.ItemName = $"{packageName} - played {played / 60}h {played % 60}m, hourly rate";
+            return;
+        }
+
+        // Rounding (and a discount) live in displayGaming; the package line never shows more than it.
+        var packageLine = Math.Min(packagePrice, displayGaming);
+        gamingItem.ItemName = packageName;
+        gamingItem.UnitPrice = gamingItem.TotalPrice = packageLine;
+
+        var extra = displayGaming - packageLine;
+        if (extra <= 0) return;
+        var extraItem = new BillItem
+        {
+            Id = Guid.NewGuid(),
+            BillId = bill.Id,
+            ItemType = "gaming",
+            ItemName = $"Extra time {Math.Max(0, played - packageMinutes)}m",
+            Quantity = 1,
+            UnitPrice = extra,
+            TotalPrice = extra,
+            CreatedAt = now
+        };
+        // Added explicitly: found only through bill.Items, a row with its Id already set is
+        // taken for an existing one and saved as an UPDATE of nothing (409 on every extended stop).
+        _db.Add(extraItem);
     }
 
     public async Task<SessionDto> ExtendSessionAsync(Guid branchId, Guid operatorId, Guid sessionId, SessionExtendDto dto)
@@ -922,8 +982,15 @@ public class SessionService : ISessionService
             // charge already committed to the customer the moment it's added, same reasoning as
             // the original package price at Start. Stop honors this running total within a grace
             // window rather than forfeiting it for landing a few minutes off the combined plan.
-            session.PricingPackageId ??= matchingPackage?.Id;
-            session.PackagePrice = (session.PackagePrice ?? 0m) + additionalAmount;
+            //
+            // Sessions that remember their package (PackageMinutes) skip this: the package keeps
+            // its own price and whatever is played past it is billed by the minute at Stop, so
+            // getting up 20 minutes into a 1 hour extension pays for 20 minutes (owner, 25 Oct).
+            if (session.PackageMinutes == null)
+            {
+                session.PricingPackageId ??= matchingPackage?.Id;
+                session.PackagePrice = (session.PackagePrice ?? 0m) + additionalAmount;
+            }
             
             var newGamingType = $"{session.GamingType} + {dto.PackageName}";
             if (newGamingType.Length > 150)
@@ -994,7 +1061,8 @@ public class SessionService : ISessionService
                     : 0;
                 await _hubNotifier.SendUnlockCommandToAgentAsync(
                     session.PcId, remainingNow, session.CustomerName,
-                    packagePrice: session.PackagePrice, plannedDurationMin: session.PlannedDurationMin,
+                    packagePrice: session.PackagePrice, plannedDurationMin: session.PackageMinutes ?? session.PlannedDurationMin,
+                    packageFromMin: session.PackageFromMin,
                     ratePerHour: session.Pc.PricingProfile?.BaseHourlyRate ?? 0m,
                     bufferMinutes: session.Pc.PricingProfile?.BufferMinutes ?? SessionPricingCalculator.DefaultBufferMinutes,
                     sessionStartUtc: session.StartTime);

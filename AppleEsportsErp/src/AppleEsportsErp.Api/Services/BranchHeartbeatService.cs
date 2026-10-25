@@ -174,7 +174,8 @@ public class BranchHeartbeatService : BackgroundService
                 SessionStartTime = p.CurrentSession != null ? p.CurrentSession.StartTime : (DateTimeOffset?)null,
                 SessionEndTime = p.CurrentSession != null ? p.CurrentSession.EndTime : null,
                 SessionPackagePrice = p.CurrentSession != null ? p.CurrentSession.PackagePrice : null,
-                SessionPlannedDurationMin = p.CurrentSession != null ? p.CurrentSession.PlannedDurationMin : null,
+                SessionPlannedDurationMin = p.CurrentSession != null ? p.CurrentSession.PackageMinutes ?? p.CurrentSession.PlannedDurationMin : null,
+                SessionPackageFromMin = p.CurrentSession != null ? p.CurrentSession.PackageFromMin : null,
                 PoweredOff = p.PoweredOff,
             })
             .ToListAsync(ct);
@@ -2222,6 +2223,7 @@ public class BranchHeartbeatService : BackgroundService
                 pkgRow.DurationMinutes = incoming.DurationMinutes;
                 pkgRow.Price = incoming.Price;
                 pkgRow.SortOrder = incoming.SortOrder;
+                pkgRow.PackagePriceFromMin = incoming.PackagePriceFromMin;
                 pkgRow.IsActive = incoming.IsActive;
                 pkgRow.UpdatedAt = DateTimeOffset.UtcNow;
             }
@@ -2235,6 +2237,7 @@ public class BranchHeartbeatService : BackgroundService
                     DurationMinutes = incoming.DurationMinutes,
                     Price = incoming.Price,
                     SortOrder = incoming.SortOrder,
+                    PackagePriceFromMin = incoming.PackagePriceFromMin,
                     IsActive = incoming.IsActive,
                     CreatedAt = DateTimeOffset.UtcNow,
                     UpdatedAt = DateTimeOffset.UtcNow,
