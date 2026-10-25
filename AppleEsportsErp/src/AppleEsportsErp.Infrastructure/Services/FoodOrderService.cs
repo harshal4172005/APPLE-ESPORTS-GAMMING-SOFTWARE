@@ -173,6 +173,17 @@ public class FoodOrderService : IFoodOrderService
                 if (activeBill == null)
                     throw new AppException("Cannot place order. No active bill found for the session.");
 
+                // A member orders only what their food wallet covers (MemberFoodAllowance). More
+                // than that is a walk-in food bill instead, paid on the spot - never a credit.
+                if (activeBill.MemberId is { } memberId)
+                {
+                    var available = await MemberFoodAllowance.AvailableAsync(
+                        _unitOfWork.Repository<Member>().Query(), _unitOfWork.Repository<FoodOrder>().Query(),
+                        memberId, dto.SessionId);
+                    if (totalAmount > available)
+                        throw new AppException($"Member's food balance is ₹{available:0}. Make a walk-in food bill instead.");
+                }
+
                 order.PaymentType = "session_bill";
                 order.MemberId = activeBill.MemberId;
                 order.BillId = activeBill.Id;

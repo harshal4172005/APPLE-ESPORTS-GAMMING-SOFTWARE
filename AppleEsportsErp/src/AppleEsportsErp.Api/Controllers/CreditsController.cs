@@ -41,9 +41,9 @@ public class CreditsController : ControllerBase
     /// handler, which is where somebody would actually look.
     /// </summary>
     [HttpGet]
-    public async Task<IActionResult> GetCredits([FromQuery] string status = "pending", [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+    public async Task<IActionResult> GetCredits([FromQuery] string status = "pending", [FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] DateOnly? from = null, [FromQuery] DateOnly? to = null)
     {
-        var result = await _creditService.GetCreditsAsync(GetBranchId(), status, page, pageSize);
+        var result = await _creditService.GetCreditsAsync(GetBranchId(), status, page, pageSize, from, to);
         return Ok(ApiResponse<PaginatedResult<CreditDto>>.Ok(result));
     }
 
@@ -63,9 +63,9 @@ public class CreditsController : ControllerBase
     /// <summary>A member's wallet top-up given on credit - separate from bill credits above,
     /// see MemberTopUpCredit's own docstring for why.</summary>
     [HttpGet("member-topups")]
-    public async Task<IActionResult> GetMemberTopUpCredits([FromQuery] string status = "pending", [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+    public async Task<IActionResult> GetMemberTopUpCredits([FromQuery] string status = "pending", [FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] DateOnly? from = null, [FromQuery] DateOnly? to = null)
     {
-        var result = await _creditService.GetMemberTopUpCreditsAsync(GetBranchId(), status, page, pageSize);
+        var result = await _creditService.GetMemberTopUpCreditsAsync(GetBranchId(), status, page, pageSize, from, to);
         return Ok(ApiResponse<PaginatedResult<MemberTopUpCreditDto>>.Ok(result));
     }
 

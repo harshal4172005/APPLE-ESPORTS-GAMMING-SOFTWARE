@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Clock, Search, CheckCircle2, User, Wallet, AlertCircle, Phone, X, Smartphone, Banknote, ArrowLeftRight, CalendarDays } from 'lucide-react';
+import { Clock, Search, CheckCircle2, User, Wallet, AlertCircle, Phone, X, Smartphone, Banknote, ArrowLeftRight, CalendarDays, Download } from 'lucide-react';
 import api from '../../config/api';
 import PageHeader from '../../components/layout/PageHeader';
 import { useToast } from '../../components/ui/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { formatMoney } from '../../utils/money';
+import { createReport, addStatGrid, addTable, save } from '../../utils/pdfReport';
 
 // No Rs 1000 or Rs 2000: neither note is in circulation in India any more.
 const DENOMINATIONS = [10, 20, 50, 100, 200, 500];
@@ -40,7 +41,11 @@ export default function CreditsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState('pending'); // 'pending' | 'cleared' | 'all'
   const [searchQuery, setSearchQuery] = useState('');
-  const [dateFilter, setDateFilter] = useState(''); // '' = every date
+  // A date range ('' = every date). Applied by the server, so every credit taken or cleared in
+  // the range comes back - not just the latest 100 the unfiltered list asks for.
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const hasRange = !!dateFrom && !!dateTo;
   
   const [selectedCredit, setSelectedCredit] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -57,9 +62,12 @@ export default function CreditsPage() {
     if (!targetBranchId) return;
     try {
       setIsLoading(true);
+      const params = hasRange
+        ? { status: filter, page: 1, pageSize: 2000, from: dateFrom, to: dateTo }
+        : { status: filter, page: 1, pageSize: 100 };
       const [billRes, topUpRes] = await Promise.all([
-        api.get('/credits', { params: { status: filter, page: 1, pageSize: 100 } }),
-        api.get('/credits/member-topups', { params: { status: filter, page: 1, pageSize: 100 } }),
+        api.get('/credits', { params }),
+        api.get('/credits/member-topups', { params }),
       ]);
       const billCredits = (billRes.data.data?.items || []).map(c => ({ ...c, source: 'bill' }));
       // Normalized to the exact shape the table/modal below already read, rather than teaching
@@ -85,7 +93,7 @@ export default function CreditsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [targetBranchId, filter]);
+  }, [targetBranchId, filter, hasRange, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchCredits();
@@ -152,23 +160,57 @@ export default function CreditsPage() {
     );
   }
 
-  // A credit is dated by when it was taken. A cleared one is matched on either day - the day
-  // it was given or the day the money finally came in - because both are days somebody would
-  // reasonably look it up under, and being told "no credits found" for a date you know you
-  // settled on is worse than showing the row twice across two searches.
-  const matchesDate = (c) => {
-    if (!dateFilter) return true;
-    const onDay = (value) => value && toDateInputValue(value) === dateFilter;
-    return onDay(c.createdAt) || onDay(c.clearedAt);
-  };
-
+  // A credit is matched on either day - the day it was given or the day the money finally came
+  // in - because both are days somebody would reasonably look it up under (the server applies
+  // the same rule for the range; see CreditService).
   const filteredCredits = credits
-    .filter(c =>
-      (!searchQuery || (c.customerName || 'Walk-in').toLowerCase().includes(searchQuery.toLowerCase()))
-      && matchesDate(c)
-    )
+    .filter(c => !searchQuery || (c.customerName || 'Walk-in').toLowerCase().includes(searchQuery.toLowerCase()))
     // Two sources merged above - newest first either way, same as the single-source list always was.
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const setToday = () => {
+    const today = toDateInputValue(new Date());
+    setDateFrom(today);
+    setDateTo(today);
+  };
+
+  // Exactly what is on screen - same tab, range and search.
+  const handleDownloadPdf = () => {
+    if (filteredCredits.length === 0) return;
+    const rangeLabel = !hasRange ? 'All dates'
+      : dateFrom === dateTo ? formatDay(dateFrom) : `${formatDay(dateFrom)} to ${formatDay(dateTo)}`;
+    const subtitle = `${activeBranch?.name || 'Branch'}  •  ${rangeLabel}  •  ${filter === 'pending' ? 'Pending' : 'Cleared'}`
+      + (searchQuery ? `  •  "${searchQuery}"` : '');
+    const { doc } = createReport({ title: 'Credits', subtitle });
+
+    const pending = filteredCredits.filter(c => c.status?.toLowerCase() !== 'cleared');
+    const cleared = filteredCredits.filter(c => c.status?.toLowerCase() === 'cleared');
+    const sum = (list) => list.reduce((s, c) => s + (Number(c.creditAmount) || 0), 0);
+    const y = addStatGrid(doc, 90, [
+      { label: 'Credits', value: String(filteredCredits.length) },
+      { label: 'Total pending', value: `Rs ${formatMoney(sum(pending))}` },
+      { label: 'Total cleared', value: `Rs ${formatMoney(sum(cleared))}` },
+    ]);
+
+    addTable(doc, y, {
+      title: 'Credits', subtitle,
+      head: ['Date taken', 'Customer', 'Phone', 'Type', 'Bill', 'Paid then', 'Credit', 'Status', 'Cleared on'],
+      body: filteredCredits.map(c => [
+        `${formatDay(c.createdAt)} ${formatTime(c.createdAt)}`,
+        c.customerName || 'Walk-in',
+        c.customerPhone || '',
+        c.source === 'topup' ? 'Member top-up' : (c.pcNumber ? `Bill - ${c.pcNumber}` : 'Bill'),
+        `Rs ${formatMoney(c.originalBillAmount)}`,
+        `Rs ${formatMoney(c.amountPaidInitially)}`,
+        `Rs ${formatMoney(c.creditAmount)}`,
+        c.status,
+        c.clearedAt ? `${formatDay(c.clearedAt)} ${formatTime(c.clearedAt)}` : '',
+      ]),
+    });
+
+    const stamp = !hasRange ? 'all-dates' : dateFrom === dateTo ? dateFrom : `${dateFrom}_to_${dateTo}`;
+    save(doc, `credits-${filter}-${stamp}.pdf`);
+  };
 
   const creditDue = Number(selectedCredit?.creditAmount) || 0;
   const cashTendered = Number(cashReceived) || 0;
@@ -215,23 +257,50 @@ export default function CreditsPage() {
             <CalendarDays className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-3 pointer-events-none" />
             <input
               type="date"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(e) => { setDateFrom(e.target.value); if (!dateTo || e.target.value > dateTo) setDateTo(e.target.value); }}
               className="pl-9 pr-3 py-1.5 text-sm bg-bg-3 border border-border rounded-lg text-text focus:outline-none focus:border-accent transition-colors [color-scheme:dark]"
-              title="Show only credits from this date"
+              title="From - credits taken or cleared on or after this date"
             />
           </div>
+          <span className="text-text-3 text-xs uppercase font-bold">to</span>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(e) => { setDateTo(e.target.value); if (!dateFrom || e.target.value < dateFrom) setDateFrom(e.target.value); }}
+            className="px-3 py-1.5 text-sm bg-bg-3 border border-border rounded-lg text-text focus:outline-none focus:border-accent transition-colors [color-scheme:dark]"
+            title="To - credits taken or cleared on or before this date"
+          />
 
-          {/* Only offered once a date is set, so the row does not carry a dead control all day. */}
-          {dateFilter && (
+          <button
+            onClick={setToday}
+            className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-text-3 hover:text-accent hover:bg-accent/10 border border-border rounded-lg transition-colors"
+            title="Only today"
+          >
+            Today
+          </button>
+
+          {/* Only offered once a range is set, so the row does not carry a dead control all day. */}
+          {hasRange && (
             <button
-              onClick={() => setDateFilter('')}
+              onClick={() => { setDateFrom(''); setDateTo(''); }}
               className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-text-3 hover:text-accent hover:bg-accent/10 border border-border rounded-lg transition-colors"
               title="Show every date again"
             >
               All dates
             </button>
           )}
+
+          <button
+            onClick={handleDownloadPdf}
+            disabled={isLoading || filteredCredits.length === 0}
+            className="btn-secondary py-1.5 px-3 flex items-center gap-1.5 text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Download exactly what is shown as a PDF"
+          >
+            <Download className="w-3.5 h-3.5" /> Download PDF
+          </button>
 
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-3" />

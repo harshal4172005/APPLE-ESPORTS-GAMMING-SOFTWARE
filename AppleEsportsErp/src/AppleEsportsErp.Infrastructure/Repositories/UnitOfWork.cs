@@ -69,6 +69,11 @@ public class UnitOfWork : IUnitOfWork
         if (_transaction == null) return;
         await _db.SharedStockRolledBackAsync();   // Head Office's shared count follows the rollback
         await _transaction.RollbackAsync(ct);
+
+        // What was rolled back must stay rolled back. Callers log the failure right after
+        // (AuditService saves on this same context), and that save used to write every change
+        // still tracked here - a refused food order still took its stock off the shelf.
+        _db.ChangeTracker.Clear();
         await _transaction.DisposeAsync();
         _transaction = null;
     }

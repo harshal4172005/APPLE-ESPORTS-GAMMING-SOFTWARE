@@ -144,6 +144,16 @@ public class PcOverlayHub : Hub
                         .FirstOrDefaultAsync();
                 }
 
+                // A member orders only what their food wallet covers (MemberFoodAllowance) -
+                // anything more is a walk-in food bill at the counter, paid on the spot.
+                if (session?.MemberId is { } memberId)
+                {
+                    var available = await AppleEsportsErp.Infrastructure.Services.MemberFoodAllowance.AvailableAsync(
+                        _db.Members, _db.FoodOrders, memberId, session.Id);
+                    if (payload.TotalAmount > available)
+                        return new { success = false, error = $"Not enough food balance (₹{available:0}). Please order at the counter." };
+                }
+
                 var orderNumber = $"ORD-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{new Random().Next(100, 999)}";
 
                 var order = new FoodOrder

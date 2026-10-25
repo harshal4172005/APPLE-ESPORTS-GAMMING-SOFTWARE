@@ -24,7 +24,8 @@ public class CreditService : ICreditService
         _auditService = auditService;
     }
 
-    public async Task<PaginatedResult<CreditDto>> GetCreditsAsync(Guid branchId, string status = "pending", int page = 1, int pageSize = 50)
+    public async Task<PaginatedResult<CreditDto>> GetCreditsAsync(Guid branchId, string status = "pending", int page = 1, int pageSize = 50,
+        DateOnly? from = null, DateOnly? to = null)
     {
         var query = _unitOfWork.Repository<CustomerCredit>().Query()
             .Where(c => c.BranchId == branchId);
@@ -32,6 +33,14 @@ public class CreditService : ICreditService
         if (!string.IsNullOrEmpty(status) && status.ToLower() != "all")
         {
             query = query.Where(c => c.Status.ToLower() == status.ToLower());
+        }
+
+        // A date range (IST days): every credit taken in it, or cleared in it.
+        if (from is { } f && to is { } t)
+        {
+            var (start, _) = AppleEsportsErp.Application.Services.IndiaTime.BusinessDayRange(f);
+            var (_, end) = AppleEsportsErp.Application.Services.IndiaTime.BusinessDayRange(t);
+            query = query.Where(c => (c.CreatedAt >= start && c.CreatedAt < end) || (c.ClearedAt >= start && c.ClearedAt < end));
         }
 
         query = query.OrderByDescending(c => c.CreatedAt);
@@ -179,13 +188,21 @@ public class CreditService : ICreditService
     }
 
     public async Task<PaginatedResult<MemberTopUpCreditDto>> GetMemberTopUpCreditsAsync(
-        Guid branchId, string status = "pending", int page = 1, int pageSize = 50)
+        Guid branchId, string status = "pending", int page = 1, int pageSize = 50,
+        DateOnly? from = null, DateOnly? to = null)
     {
         var query = _unitOfWork.Repository<MemberTopUpCredit>().Query()
             .Where(c => c.BranchId == branchId);
 
         if (!string.IsNullOrEmpty(status) && status.ToLower() != "all")
             query = query.Where(c => c.Status.ToLower() == status.ToLower());
+
+        if (from is { } f && to is { } t)
+        {
+            var (start, _) = AppleEsportsErp.Application.Services.IndiaTime.BusinessDayRange(f);
+            var (_, end) = AppleEsportsErp.Application.Services.IndiaTime.BusinessDayRange(t);
+            query = query.Where(c => (c.CreatedAt >= start && c.CreatedAt < end) || (c.ClearedAt >= start && c.ClearedAt < end));
+        }
 
         query = query.OrderByDescending(c => c.CreatedAt);
 

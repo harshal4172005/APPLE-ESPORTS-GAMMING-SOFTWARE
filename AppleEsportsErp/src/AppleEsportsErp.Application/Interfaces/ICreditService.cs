@@ -8,9 +8,9 @@ namespace AppleEsportsErp.Application.Interfaces;
 
 public interface ICreditService
 {
-    Task<PaginatedResult<CreditDto>> GetCreditsAsync(Guid branchId, string status = "pending", int page = 1, int pageSize = 50);
+    Task<PaginatedResult<CreditDto>> GetCreditsAsync(Guid branchId, string status = "pending", int page = 1, int pageSize = 50, DateOnly? from = null, DateOnly? to = null);
     Task<CreditDto> ClearCreditAsync(Guid branchId, Guid operatorId, Guid shiftId, Guid creditId, ClearCreditDto dto);
 
-    Task<PaginatedResult<MemberTopUpCreditDto>> GetMemberTopUpCreditsAsync(Guid branchId, string status = "pending", int page = 1, int pageSize = 50);
+    Task<PaginatedResult<MemberTopUpCreditDto>> GetMemberTopUpCreditsAsync(Guid branchId, string status = "pending", int page = 1, int pageSize = 50, DateOnly? from = null, DateOnly? to = null);
     Task<MemberTopUpCreditDto> ClearMemberTopUpCreditAsync(Guid branchId, Guid operatorId, Guid shiftId, Guid creditId, ClearCreditDto dto);
 }
