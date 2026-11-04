@@ -25,11 +25,20 @@ public class PcsController : ControllerBase
     private readonly IUnitOfWork _unitOfWork;
     private readonly IRemoteBranchControl _remote;
 
-    public PcsController(IPcStatusService pcStatusService, IUnitOfWork unitOfWork, IRemoteBranchControl remote)
+    private readonly IHubNotificationService _hub;
+
+    public PcsController(IPcStatusService pcStatusService, IUnitOfWork unitOfWork, IRemoteBranchControl remote, IHubNotificationService hub)
     {
         _pcStatusService = pcStatusService;
         _unitOfWork = unitOfWork;
         _remote = remote;
+        _hub = hub;
+    }
+
+    private async Task BroadcastFleetChangeAsync(Guid branchId, Guid pcId, string action)
+    {
+        try { await _hub.BroadcastPcManagementUpdateAsync(branchId, pcId, action); }
+        catch { /* a missed live refresh is not worth failing the change over */ }
     }
 
     [HttpGet]
@@ -67,6 +76,30 @@ public class PcsController : ControllerBase
             .OrderBy(p => p.PcNumber)
             .ToListAsync();
 
+        // Head Office only: the last edit/delete sent to the branch for each PC in the past day, so
+        // the list can say "Sending to branch..." or show why the branch refused, after a refresh too.
+        var lastCommand = new Dictionary<Guid, object>();
+        if (_remote.MustTravel)
+        {
+            var since = DateTimeOffset.UtcNow.AddDays(-1);
+            var commands = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.BranchCommand>().Query().AsNoTracking()
+                .Where(c => c.BranchId == targetBranchId.Value && c.CreatedAt > since
+                            && (c.CommandType == BranchCommands.UpdatePc || c.CommandType == BranchCommands.DeletePc))
+                .OrderBy(c => c.CreatedAt)
+                .ToListAsync();
+            foreach (var c in commands)
+            {
+                if (ReadPayloadId(c.Payload) is not { } pcId) continue;
+                lastCommand[pcId] = new
+                {
+                    commandId = c.Id,
+                    type = c.CommandType,
+                    status = c.Status.ToString().ToLowerInvariant(),
+                    message = c.ResultMessage,
+                };
+            }
+        }
+
         var dtos = pcs.Select(p => new {
             p.Id,
             p.PcNumber,
@@ -76,10 +109,12 @@ public class PcsController : ControllerBase
             p.Specs,
             p.Zone,
             p.HardwareNotes,
+            p.PricingProfileId,
             State = p.State.ToString(),
             p.IsActive,
             p.CreatedAt,
-            p.UpdatedAt
+            p.UpdatedAt,
+            LastBranchCommand = lastCommand.GetValueOrDefault(p.Id),
         });
 
         return Ok(ApiResponse<object>.Ok(dtos));
@@ -233,7 +268,7 @@ public class PcsController : ControllerBase
         {
             var receipt = await _remote.SendAsync(
                 pc.BranchId, BranchCommands.UpdatePc,
-                new { Id = id, dto.PcNumber, dto.PcName, dto.IpAddress, dto.Specs, dto.Zone, dto.HardwareNotes },
+                new { Id = id, dto.PcNumber, dto.PcName, dto.IpAddress, dto.Specs, dto.Zone, dto.HardwareNotes, dto.PricingProfileId },
                 Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), ct);
 
             return Accepted(ApiResponse<object>.Ok(new
@@ -251,18 +286,16 @@ public class PcsController : ControllerBase
 
         if (exists) return BadRequest(ApiResponse<object>.Fail("PC number already exists in this branch"));
 
-        var isConsole = string.Equals(dto.Zone, "Console", StringComparison.OrdinalIgnoreCase);
+        if (dto.PricingProfileId is { } profileId
+            && !await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.PricingProfile>().Query()
+                .AnyAsync(pp => pp.Id == profileId && pp.BranchId == pc.BranchId))
+            return BadRequest(ApiResponse<object>.Fail("That pricing profile does not belong to this branch."));
 
-        pc.PcNumber = dto.PcNumber;
-        pc.PcName = dto.PcName ?? dto.PcNumber;
-        pc.IpAddress = isConsole ? null : dto.IpAddress;
-        pc.Specs = dto.Specs ?? "{}";
-        pc.Zone = dto.Zone ?? "Standard";
-        pc.HardwareNotes = dto.HardwareNotes;
-        pc.UpdatedAt = DateTimeOffset.UtcNow;
+        PcFleetEdits.ApplyUpdate(pc, dto);
 
         _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Pc>().Update(pc);
         await _unitOfWork.SaveChangesAsync();
+        await BroadcastFleetChangeAsync(pc.BranchId, pc.Id, "updated");
 
         return Ok(ApiResponse<object>.Ok(new { pc.Id, pc.PcNumber }));
     }
@@ -276,6 +309,9 @@ public class PcsController : ControllerBase
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
 
         if (pc == null) return NotFound(ApiResponse<object>.Fail("PC not found"));
+
+        if (PcFleetEdits.DeleteBlockedReason(pc) is { } blocked)
+            return BadRequest(ApiResponse<object>.Fail(blocked, "PC_IN_USE"));
 
         // Same reasoning as Update above: deleting here only ever touched Head Office's own
         // mirror. This is the confirmed cause of a branch reporting far more PCs than are
@@ -297,13 +333,26 @@ public class PcsController : ControllerBase
             }));
         }
 
-        pc.IsDeleted = true;
-        pc.UpdatedAt = DateTimeOffset.UtcNow;
+        PcFleetEdits.MarkDeleted(pc);
 
         _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Pc>().Update(pc);
         await _unitOfWork.SaveChangesAsync();
+        await BroadcastFleetChangeAsync(pc.BranchId, pc.Id, "deleted");
 
         return Ok(ApiResponse<object>.Ok(new { message = "PC deleted successfully" }));
     }
-}
 
+    /// <summary>The PC id inside an update_pc / delete_pc payload ("Id", any casing).</summary>
+    private static Guid? ReadPayloadId(string payload)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(payload);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+                if (string.Equals(prop.Name, "id", StringComparison.OrdinalIgnoreCase) && prop.Value.TryGetGuid(out var id))
+                    return id;
+        }
+        catch (System.Text.Json.JsonException) { }
+        return null;
+    }
+}

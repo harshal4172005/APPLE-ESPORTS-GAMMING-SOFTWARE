@@ -159,6 +159,21 @@ public static class ControllerExtensions
         // shift and register for the system-admin operator, because "most recent Active shift
         // for the branch" happened to resolve to a real operator's own shift - the admin action
         // silently landed nowhere near the operator it was meant to fix, with no error to say so.
+        // A real operator on shift at this counter owns whatever happens there - a member's
+        // logout bill, a Super Admin's walk-in bill. Putting it on a hidden "System
+        // Administrator" shift instead kept the operator's drawer short and left that shift
+        // open for the next morning's login to "take over" (77 of 79 takeovers, Oct-Nov 2026).
+        var operatorShiftId = await db.Shifts
+            .Where(s => s.BranchId == branchId && s.Status == ShiftStatus.Active
+                        && !s.Operator.Username.StartsWith("system_admin_"))
+            .OrderByDescending(s => s.LoginTime)
+            .Select(s => (Guid?)s.Id)
+            .FirstOrDefaultAsync();
+        if (operatorShiftId is { } onShift)
+            return onShift;
+
+        // Nobody on shift (a member playing before opening, say): fall back to the placeholder.
+        // The next operator login closes it rather than asking anyone to count it.
         var sysOpId = await controller.GetOperatorIdAsync();
         var activeShift = await db.Shifts
             .Where(s => s.BranchId == branchId && s.OperatorId == sysOpId && s.Status == ShiftStatus.Active)

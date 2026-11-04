@@ -12,6 +12,7 @@ public class EodReportDto
 
     /// <summary>Whether what was billed agrees with what was taken. See EodReconciliationDto.</summary>
     public EodReconciliationDto Reconciliation { get; set; } = new();
+    public OperatorBoxesDto OperatorBoxes { get; set; } = new();
 
     /// <summary>Missing-stock bills raised or paid today, whoever they charge.</summary>
     public List<AppleEsportsErp.Application.DTOs.Reports.StockShortageDto> StockShortages { get; set; } = new();
@@ -219,4 +220,33 @@ public class OperationalStatsDto
     public int TotalReservations { get; set; }
     public int TotalFoodOrders { get; set; }
     public int NewMembersRegistered { get; set; }
+}
+
+/// <summary>
+/// The "What the operator sees" boxes: every rupee that actually came in today, by where it came from.
+/// Display only - nothing in Revenue, PaymentMethods or Reconciliation reads these.
+/// </summary>
+public class OperatorBoxesDto
+{
+    public decimal CashFromBills { get; set; }
+    public decimal CashFromCreditsCleared { get; set; }
+    public decimal CashFromTopUps { get; set; }
+    public decimal CashFromReservationDeposits { get; set; }
+    public decimal Cash { get; set; }
+
+    public decimal OnlineFromBills { get; set; }
+    public decimal OnlineFromCreditsCleared { get; set; }
+    public decimal OnlineFromTopUps { get; set; }
+    public decimal OnlineFromReservationDeposits { get; set; }
+    public decimal Online { get; set; }
+
+    /// <summary>Food money received today - the food share of cash/online payments. Never food paid
+    /// from the member food wallet (that money was counted when they topped up).</summary>
+    public decimal FoodCash { get; set; }
+    public decimal FoodOnline { get; set; }
+    public decimal Food { get; set; }
+
+    public int PaymentMethodEdits { get; set; }
+    /// <summary>Edits that changed cash but could not move a drawer (it was already closed).</summary>
+    public int PaymentMethodEditsNotInDrawer { get; set; }
 }

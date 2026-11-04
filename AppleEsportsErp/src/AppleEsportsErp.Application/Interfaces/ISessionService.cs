@@ -23,5 +23,9 @@ public interface ISessionService
     /// </summary>
     Task<SessionDto> ResumeSessionAsync(Guid branchId, Guid operatorId, Guid sessionId);
     Task<SessionDto> ExtendSessionAsync(Guid branchId, Guid operatorId, Guid sessionId, SessionExtendDto dto);
+    /// <summary>Every package this running session could become now, with price, time left and why not.</summary>
+    Task<PackageOptionsDto> GetPackageOptionsAsync(Guid branchId, Guid sessionId);
+    /// <summary>The session becomes that package from its own start: its price, its length.</summary>
+    Task<SessionDto> ChangePackageAsync(Guid branchId, Guid operatorId, Guid sessionId, Guid packageId);
     Task<SessionDto> TransferSessionAsync(Guid branchId, Guid operatorId, Guid sessionId, SessionTransferDto dto);
 }

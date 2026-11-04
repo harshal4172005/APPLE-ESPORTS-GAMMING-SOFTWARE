@@ -142,6 +142,16 @@ CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(""Status"");
 ALTER TABLE employees
 ADD COLUMN IF NOT EXISTS ""PhotoDataUrl"" text,
 ADD COLUMN IF NOT EXISTS ""AadharDataUrl"" text;
+
+-- One fridge, one count: who counted a shared item last, and when.
+ALTER TABLE shared_stock_counts
+ADD COLUMN IF NOT EXISTS ""CountedAt"" timestamptz,
+ADD COLUMN IF NOT EXISTS ""CountedByBranchId"" uuid,
+ADD COLUMN IF NOT EXISTS ""CountedByName"" text;
+
+-- When the operator opened the count screen, so what moved while they counted can be shown.
+ALTER TABLE stock_counts
+ADD COLUMN IF NOT EXISTS ""OpenedAt"" timestamptz;
 ");
 
         // A PC that has never been claimed by a real machine used to be created as Idle -

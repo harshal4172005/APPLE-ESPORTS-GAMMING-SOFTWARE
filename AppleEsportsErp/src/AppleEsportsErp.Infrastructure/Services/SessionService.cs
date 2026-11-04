@@ -556,7 +556,10 @@ public class SessionService : ISessionService
 
             if (bill != null)
             {
-                // Preserve any discount already applied to the bill instead of wiping it out.
+                // Preserve any discount already applied to the bill instead of wiping it out -
+                // but never more than the bill came to. A fixed ₹ discount given early on a
+                // session that ended small would otherwise be reported as more than was given.
+                bill.DiscountAmount = Math.Min(bill.DiscountAmount, session.GamingAmount + foodAmount);
                 var (displayGaming, displayFood, roundedTotal) = SessionPricingCalculator.ComputeRoundedBreakdown(
                     session.GamingAmount, foodAmount, bill.DiscountAmount);
 
@@ -597,8 +600,12 @@ public class SessionService : ISessionService
                 && bill.Status != BillStatus.Completed && bill.TotalAmount > 0)
             {
                 var member = session.Member;
-                decimal gamingOwed = bill.GamingAmount;
-                decimal foodOwed = bill.FoodAmount;
+                // What the member owes is the bill AFTER its discount. This used to charge
+                // GamingAmount + FoodAmount in full, so a discount showed on the bill but the
+                // wallet still paid the sticker price. Taken off gaming first, then food;
+                // gamingOwed + foodOwed == TotalAmount (the rounding already sits in GamingAmount).
+                decimal gamingOwed = Math.Max(0m, bill.GamingAmount - bill.DiscountAmount);
+                decimal foodOwed = Math.Max(0m, bill.FoodAmount - (bill.DiscountAmount - (bill.GamingAmount - gamingOwed)));
 
                 decimal gamingDeduct = Math.Min(member.GamingBalance, gamingOwed);
                 decimal foodDeduct = Math.Min(member.FoodBalance, foodOwed);
@@ -936,6 +943,200 @@ public class SessionService : ISessionService
         _db.Add(extraItem);
     }
 
+    private Task<Session?> LoadForPackageChangeAsync(Guid branchId, Guid sessionId) =>
+        _db.Sessions
+            .Include(s => s.Pc).ThenInclude(p => p!.PricingProfile).ThenInclude(pp => pp!.Packages)
+            .Include(s => s.Bills).ThenInclude(b => b.Items)
+            .Include(s => s.Member)
+            .FirstOrDefaultAsync(s => s.Id == sessionId && s.BranchId == branchId);
+
+    private static string Hm(decimal minutes)
+    {
+        var m = (int)Math.Floor(minutes);
+        return m >= 60 ? $"{m / 60} hr{(m % 60 > 0 ? $" {m % 60} min" : "")}" : $"{m} min";
+    }
+
+    /// <summary>
+    /// Owner's rule (4 Nov 2026): changing a package mid-session makes the session that package from
+    /// its own start - 4 hr after 3 hr played, switched to Full Day (14 hr), is a Full Day bill with
+    /// 11 hr left, not 4 hr + Full Day. Down works the same way, but only while they have not already
+    /// played past the smaller package. A member must be able to pay for it from the gaming wallet.
+    /// </summary>
+    private static PackageOptionsDto BuildPackageOptions(Session session, DateTimeOffset now)
+    {
+        var result = new PackageOptionsDto
+        {
+            SessionId = session.Id,
+            CurrentName = session.GamingType,
+            CurrentPrice = session.PackagePrice ?? session.GamingAmount,
+        };
+        var played = SessionTimeCalculator.ElapsedMinutes(session.StartTime, session.PausedSeconds, now);
+        result.PlayedMinutes = (int)Math.Floor(played);
+
+        if (session.State != SessionState.Active)
+        {
+            result.Unavailable = "The session is not running.";
+            return result;
+        }
+        if (session.PlannedDurationMin is null)
+        {
+            result.Unavailable = "Pay-As-You-Go has no package to change.";
+            return result;
+        }
+
+        var packages = session.Pc?.PricingProfile?.Packages?
+            .Where(p => p.IsActive)
+            .OrderBy(p => p.DurationMinutes).ThenBy(p => p.SortOrder)
+            .ToList() ?? new List<PricingPackage>();
+
+        foreach (var pkg in packages)
+        {
+            var isCurrent = session.PricingPackageId == pkg.Id;
+            var option = new PackageOptionDto
+            {
+                PackageId = pkg.Id,
+                Name = pkg.Name,
+                Minutes = pkg.DurationMinutes,
+                Price = pkg.Price,
+                IsCurrent = isCurrent,
+                MinutesLeftAfter = (int)Math.Max(0, Math.Floor(pkg.DurationMinutes - played)),
+            };
+
+            if (isCurrent) option.Reason = "Current package";
+            else if (pkg.DurationMinutes - played < 1) option.Reason = $"Already played {Hm(played)}";
+            else if (session.Member is { } member && member.GamingBalance < pkg.Price)
+                option.Reason = $"Gaming balance \u20b9{member.GamingBalance:0} - top up at the counter";
+            else option.Allowed = true;
+
+            result.Options.Add(option);
+        }
+        return result;
+    }
+
+    public async Task<PackageOptionsDto> GetPackageOptionsAsync(Guid branchId, Guid sessionId)
+    {
+        var session = await LoadForPackageChangeAsync(branchId, sessionId)
+            ?? throw new NotFoundException("Session not found", "SESSION_NOT_FOUND");
+        return BuildPackageOptions(session, DateTimeOffset.UtcNow);
+    }
+
+    public async Task<SessionDto> ChangePackageAsync(Guid branchId, Guid operatorId, Guid sessionId, Guid packageId)
+    {
+        await _uow.BeginTransactionAsync();
+        try
+        {
+            var session = await LoadForPackageChangeAsync(branchId, sessionId)
+                ?? throw new NotFoundException("Session not found", "SESSION_NOT_FOUND");
+            var now = DateTimeOffset.UtcNow;
+
+            var options = BuildPackageOptions(session, now);
+            if (options.Unavailable != null) throw new AppException(options.Unavailable);
+            var option = options.Options.FirstOrDefault(o => o.PackageId == packageId)
+                ?? throw new AppException("That package is not available on this PC.");
+            if (!option.Allowed) throw new AppException(option.Reason ?? "That package cannot be chosen now.");
+
+            var pkg = session.Pc!.PricingProfile!.Packages.First(p => p.Id == packageId);
+            var fromName = session.GamingType;
+            var fromPrice = options.CurrentPrice;
+
+            // Exactly the fields a session started on this package would have, from the same start.
+            session.PricingPackageId = pkg.Id;
+            session.PackagePrice = pkg.Price;
+            session.PackageMinutes = pkg.DurationMinutes;
+            session.PackageFromMin = pkg.PackagePriceFromMin;
+            session.PlannedDurationMin = pkg.DurationMinutes;
+            session.EndTime = session.StartTime.AddMinutes(pkg.DurationMinutes).AddSeconds(session.PausedSeconds);
+            session.GamingType = pkg.Name;
+            session.GamingAmount = pkg.Price;
+            session.TotalAmount = pkg.Price + session.FoodAmount;
+            session.UpdatedAt = now;
+
+            // The bill's gaming lines are replaced by the one package line: earlier extensions are
+            // part of the new package now, never charged on top of it.
+            var bill = session.Bills.FirstOrDefault(b => b.Status != BillStatus.Completed);
+            if (bill != null)
+            {
+                var oldGaming = bill.Items.Where(i => i.ItemType == "gaming").ToList();
+                foreach (var item in oldGaming) bill.Items.Remove(item);
+                _db.BillItems.RemoveRange(oldGaming);
+
+                var (displayGaming, displayFood, roundedTotal) = SessionPricingCalculator.ComputeRoundedBreakdown(
+                    pkg.Price, bill.FoodAmount, bill.DiscountAmount);
+                bill.GamingAmount = displayGaming;
+                bill.FoodAmount = displayFood;
+                bill.Subtotal = displayGaming + displayFood;
+                bill.TotalAmount = roundedTotal;
+                bill.UpdatedAt = now;
+
+                _db.BillItems.Add(new BillItem
+                {
+                    Id = Guid.NewGuid(),
+                    BillId = bill.Id,
+                    ItemType = "gaming",
+                    ItemName = $"Base Session ({pkg.DurationMinutes}m)",
+                    Quantity = 1,
+                    UnitPrice = displayGaming,
+                    TotalPrice = displayGaming,
+                    CreatedAt = now,
+                });
+            }
+
+            await _db.SaveChangesAsync();
+            await _uow.CommitTransactionAsync();
+
+            await _audit.LogAsync(new AuditEntry
+            {
+                OperatorId = operatorId,
+                UserRole = Roles.Operator,
+                UserName = string.Empty,
+                Action = AuditActions.SessionPackageChange,
+                BranchId = branchId,
+                TargetType = "session",
+                TargetId = session.Id,
+                Details = new
+                {
+                    PcNumber = session.Pc?.PcNumber,
+                    From = fromName, FromPrice = fromPrice,
+                    To = pkg.Name, ToPrice = pkg.Price,
+                    PlayedMinutes = options.PlayedMinutes, MinutesLeft = option.MinutesLeftAfter,
+                },
+            });
+
+            // Same push as an extension: the gaming PC's own countdown and price follow at once.
+            if (session.Pc != null)
+            {
+                await _hubNotifier.SendUnlockCommandToAgentAsync(
+                    session.PcId, option.MinutesLeftAfter, session.CustomerName,
+                    packagePrice: session.PackagePrice, plannedDurationMin: session.PackageMinutes,
+                    packageFromMin: session.PackageFromMin,
+                    ratePerHour: session.Pc.PricingProfile?.BaseHourlyRate ?? 0m,
+                    bufferMinutes: session.Pc.PricingProfile?.BufferMinutes ?? SessionPricingCalculator.DefaultBufferMinutes,
+                    sessionStartUtc: session.StartTime);
+            }
+            await _hubNotifier.BroadcastSessionUpdateAsync(branchId, session.Id);
+            await _hubNotifier.BroadcastPcStatusChangeAsync(branchId, session.PcId);
+            if (bill != null) await _hubNotifier.BroadcastBillingUpdateAsync(branchId, bill.Id);
+
+            return new SessionDto
+            {
+                Id = session.Id,
+                PcId = session.PcId,
+                PcName = session.Pc?.PcNumber ?? "Unknown",
+                BranchId = branchId,
+                OperatorId = session.OperatorId,
+                ShiftId = session.ShiftId ?? Guid.Empty,
+                CustomerName = session.CustomerName,
+                StartTime = session.StartTime,
+                EndTime = session.EndTime,
+            };
+        }
+        catch
+        {
+            await _uow.RollbackTransactionAsync();
+            throw;
+        }
+    }
+
     public async Task<SessionDto> ExtendSessionAsync(Guid branchId, Guid operatorId, Guid sessionId, SessionExtendDto dto)
     {
         await _uow.BeginTransactionAsync();
@@ -961,14 +1162,8 @@ public class SessionService : ISessionService
             // already applies to a session's own start. Only a duration with no matching
             // package (a plain "45 more minutes") falls back to the hourly pro-rata this always
             // used. See BuildPlansForProfile in PublicController for the same matching logic.
-            var profile = session.Pc?.PricingProfile;
-            var matchingPackage = profile?.Packages?
-                .Where(pkg => pkg.IsActive && pkg.DurationMinutes == (int)dto.AdditionalMinutes)
-                .OrderBy(pkg => pkg.SortOrder)
-                .FirstOrDefault();
-
-            var additionalAmount = matchingPackage?.Price
-                ?? (dto.AdditionalMinutes / 60m) * (profile?.BaseHourlyRate ?? 0m);
+            var (additionalAmount, matchingPackage) =
+                SessionPricingCalculator.ExtensionPrice(session.Pc?.PricingProfile, dto.AdditionalMinutes);
 
             session.PlannedDurationMin = (session.PlannedDurationMin ?? 0) + (int)dto.AdditionalMinutes;
             if (session.EndTime.HasValue)

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Calculator, Plus, AlertTriangle, WifiOff, Calendar } from 'lucide-react';
+import { Calculator, Plus, AlertTriangle, WifiOff, Calendar, Gamepad2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import { useSocket } from '../../contexts/SocketContext';
@@ -8,6 +8,7 @@ import { format } from 'date-fns';
 import PageHeader from '../../components/layout/PageHeader';
 import OpenRegisterModal from '../../components/cash/OpenRegisterModal';
 import AddTransactionModal from '../../components/cash/AddTransactionModal';
+import Ps5EntryModal from '../../components/cash/Ps5EntryModal';
 import TransactionFeed from '../../components/cash/TransactionFeed';
 
 const todayIso = () => format(new Date(), 'yyyy-MM-dd');
@@ -32,6 +33,7 @@ export default function CashDeskPage() {
   const [error, setError] = useState(null);
 
   const [isAddTxModalOpen, setIsAddTxModalOpen] = useState(false);
+  const [isPs5ModalOpen, setIsPs5ModalOpen] = useState(false);
 
   // The Ledger itself is date-filterable - a shift ending must never mean the cash it moved
   // becomes harder to find. Kept separate from `register`, which stays the live, right-now
@@ -238,12 +240,21 @@ export default function CashDeskPage() {
         />
 
         {!isTrueSuperAdmin && (
-          <button
-            onClick={() => setIsAddTxModalOpen(true)}
-            className="btn-primary flex items-center gap-2 shadow-lg shadow-accent/20"
-          >
-            <Plus className="w-5 h-5" /> Add Entry
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsPs5ModalOpen(true)}
+              className="btn-secondary flex items-center gap-2"
+              title="A PS5 customer's play - paid cash, online, split or credit"
+            >
+              <Gamepad2 className="w-5 h-5" /> PS5
+            </button>
+            <button
+              onClick={() => setIsAddTxModalOpen(true)}
+              className="btn-primary flex items-center gap-2 shadow-lg shadow-accent/20"
+            >
+              <Plus className="w-5 h-5" /> Add Entry
+            </button>
+          </div>
         )}
       </div>
 
@@ -314,6 +325,13 @@ export default function CashDeskPage() {
       </div>
 
       {ledgerSection}
+
+      {isPs5ModalOpen && (
+        <Ps5EntryModal
+          onClose={() => setIsPs5ModalOpen(false)}
+          onDone={() => { fetchActiveRegister(); fetchLedger(); }}
+        />
+      )}
 
       {isAddTxModalOpen && (
         <AddTransactionModal

@@ -376,6 +376,91 @@ public class EodService : IEodService
             ClearedAt = c.ClearedAt < dayEnd ? c.ClearedAt : null
         }));
 
+        report.OperatorBoxes = await BuildOperatorBoxesAsync(
+            branchId, dayStart, dayEnd, payments, walletTxs, clearedMemberTopUpCashToday, clearedMemberTopUpOnlineToday, allCashTxs);
+
         return report;
+    }
+
+    /// <summary>
+    /// Owner's rule (4 Nov 2026): the boxes show every rupee that came in today, from everywhere -
+    /// bills, credits paid off, member top-ups, reservation deposits (PS5 entries are bills). Food is
+    /// only food MONEY received today, cash or online; food paid from the member food wallet was
+    /// already counted when the member topped up. Display only: no other figure reads this.
+    /// </summary>
+    private async Task<OperatorBoxesDto> BuildOperatorBoxesAsync(
+        Guid branchId, DateTimeOffset dayStart, DateTimeOffset dayEnd, List<Payment> payments,
+        List<WalletTransaction> walletTxs, decimal memberTopUpCreditCash, decimal memberTopUpCreditOnline,
+        List<CashTransaction> todaysCashTxs)
+    {
+        var boxes = new OperatorBoxesDto();
+
+        // A credit being paid off is a payment carrying no gaming/food split of its own
+        // (CreditService); every bill payment carries one.
+        static bool IsCreditClearing(Payment p) => p.GamingPortion == 0 && p.FoodPortion == 0 && p.TotalAmount > 0;
+
+        boxes.CashFromBills = payments.Where(p => !IsCreditClearing(p)).Sum(p => p.CashAmount);
+        boxes.OnlineFromBills = payments.Where(p => !IsCreditClearing(p)).Sum(p => p.OnlineAmount);
+        boxes.CashFromCreditsCleared = payments.Where(IsCreditClearing).Sum(p => p.CashAmount);
+        boxes.OnlineFromCreditsCleared = payments.Where(IsCreditClearing).Sum(p => p.OnlineAmount);
+
+        var topUps = walletTxs.Where(w => w.Action == WalletAction.Recharge).ToList();
+        boxes.CashFromTopUps = topUps.Sum(w => w.CashAmount) + memberTopUpCreditCash;
+        boxes.OnlineFromTopUps = topUps.Sum(w => w.OnlineAmount) + memberTopUpCreditOnline;
+
+        // The cash part of a deposit is a drawer row; the online part only exists as the rest of the
+        // reservation's deposit. ponytail: online is approximated per day (deposits are rare - none
+        // in the 30 days before this was written); link CashTransaction to the reservation if exact matters.
+        boxes.CashFromReservationDeposits = todaysCashTxs.Where(t => t.TransactionType == "reservation_deposit").Sum(t => t.CashAmount);
+        var depositsTaken = await _unitOfWork.Repository<Reservation>().Query()
+            .Where(r => r.BranchId == branchId && r.CreatedAt >= dayStart && r.CreatedAt < dayEnd)
+            .SumAsync(r => (decimal?)r.AdvanceDeposit) ?? 0m;
+        boxes.OnlineFromReservationDeposits = Math.Max(0m, depositsTaken - boxes.CashFromReservationDeposits);
+
+        boxes.Cash = boxes.CashFromBills + boxes.CashFromCreditsCleared + boxes.CashFromTopUps + boxes.CashFromReservationDeposits;
+        boxes.Online = boxes.OnlineFromBills + boxes.OnlineFromCreditsCleared + boxes.OnlineFromTopUps + boxes.OnlineFromReservationDeposits;
+
+        // Food money: each cash/online rupee paid against a bill carries that bill's food share
+        // (food after its part of the discount, over the bill total). One rule for full payments,
+        // part-paid credits and credits paid off later alike.
+        var billIds = payments.Select(p => p.BillId).Distinct().ToList();
+        var bills = await _unitOfWork.Repository<Bill>().Query().AsNoTracking()
+            .Where(b => billIds.Contains(b.Id))
+            .Select(b => new { b.Id, b.FoodAmount, b.Subtotal, b.DiscountAmount, b.TotalAmount })
+            .ToDictionaryAsync(b => b.Id);
+        foreach (var p in payments)
+        {
+            if (!bills.TryGetValue(p.BillId, out var b) || b.TotalAmount <= 0 || b.FoodAmount <= 0) continue;
+            var netFood = b.FoodAmount - (b.Subtotal > 0 ? b.DiscountAmount * b.FoodAmount / b.Subtotal : 0m);
+            var share = Math.Min(1m, Math.Max(0m, netFood / b.TotalAmount));
+            boxes.FoodCash += p.CashAmount * share;
+            boxes.FoodOnline += p.OnlineAmount * share;
+        }
+        boxes.FoodCash = Math.Round(boxes.FoodCash, 2);
+        boxes.FoodOnline = Math.Round(boxes.FoodOnline, 2);
+        boxes.Food = boxes.FoodCash + boxes.FoodOnline;
+
+        var edits = await _unitOfWork.Repository<AuditLog>().Query().AsNoTracking()
+            .Where(a => a.BranchId == branchId && a.Action == AppleEsportsErp.Application.Constants.AuditActions.PaymentMethodEdit
+                        && a.CreatedAt >= dayStart && a.CreatedAt < dayEnd)
+            .Select(a => a.Details)
+            .ToListAsync();
+        boxes.PaymentMethodEdits = edits.Count;
+        boxes.PaymentMethodEditsNotInDrawer = edits.Where(d => ReadFlag(d, "CashChanged") == true && ReadFlag(d, "DrawerMoved") == false).Count();
+
+        return boxes;
+    }
+
+    /// <summary>A true/false field from an audit row's details (older rows simply do not have it).</summary>
+    private static bool? ReadFlag(string? json, string name)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty(name, out var v) && v.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+                ? v.GetBoolean() : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 }

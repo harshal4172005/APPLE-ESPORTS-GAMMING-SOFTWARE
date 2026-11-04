@@ -283,7 +283,7 @@ public class SyncInboxController : ControllerBase
         int CountOf(PcState s) => pcCounts.FirstOrDefault(x => x.State == s)?.Count ?? 0;
 
         var operatorsOnDuty = await db.Shifts.AsNoTracking()
-            .CountAsync(s => s.BranchId == branchId && s.Status == ShiftStatus.Active);
+            .CountAsync(s => s.BranchId == branchId && s.Status == ShiftStatus.Active && !s.Operator.Username.StartsWith("system_admin_"));
 
         var today = IndiaTime.BusinessDayOf(DateTimeOffset.UtcNow);
         var eod = await eodService.GenerateEodReportAsync(branchId, today);
@@ -554,6 +554,10 @@ public class SyncInboxController : ControllerBase
             // Relaying these to the other branch is what looped between the two Adajan branches
             // on 20 Oct; the count lives here now, so they are kept and not passed on.
             case "inventory_stock_delta.changed":
+                break;
+
+            case "inventory_log.changed":
+                await UpsertRowAsync<InventoryLog>(held, root);
                 break;
 
             case "stock_count.changed":
@@ -911,8 +915,19 @@ public class SyncInboxController : ControllerBase
             ?? throw new InvalidOperationException(
                 $"Head Office has no member {memberId}. The member.created event should arrive first.");
 
-        member.GamingBalance = ReadDecimal(root, "gamingBalance") ?? member.GamingBalance;
-        member.FoodBalance = ReadDecimal(root, "foodBalance") ?? member.FoodBalance;
+        // The balance only moves forward in time (same rule as every other balance event), and
+        // keeps its time - which is what makes the other branches accept it on their next beat.
+        // An older branch build sends no balanceAsOf: applied as before, without the time.
+        if (ReadDate(root, "balanceAsOf") is { } asOf)
+        {
+            if (ReadDecimal(root, "gamingBalance") is { } g)
+                ApplyBalanceIfNewer(member, g, ReadDecimal(root, "foodBalance"), asOf);
+        }
+        else
+        {
+            member.GamingBalance = ReadDecimal(root, "gamingBalance") ?? member.GamingBalance;
+            member.FoodBalance = ReadDecimal(root, "foodBalance") ?? member.FoodBalance;
+        }
         member.TotalGamingTopUps = ReadDecimal(root, "totalGamingTopUps") ?? member.TotalGamingTopUps;
         member.TotalGamingBonusEarned = ReadDecimal(root, "totalGamingBonusEarned") ?? member.TotalGamingBonusEarned;
         member.TotalGamingSpend = ReadDecimal(root, "totalGamingSpend") ?? member.TotalGamingSpend;

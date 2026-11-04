@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStockVersion } from '../../components/food/SharedStockLive';
+import StockMovementPanel from '../../components/food/StockMovementPanel';
 import {
   Plus,
   ClipboardCheck,
@@ -326,6 +327,9 @@ export default function MenuEditorPage() {
           <span className={`text-2xl font-bold font-mono mt-1 ${lowStockCount > 0 ? 'text-neon-red font-extrabold animate-pulse' : 'text-text-3'}`}>{lowStockCount} items</span>
         </div>
       </div>
+
+      {/* Where the stock went: refilled vs sold vs missing, for a date range (owner, 4 Nov 2026). */}
+      <StockMovementPanel branchId={targetBranchId} />
 
       {/* Main Table Card */}
       <div className="card bg-bg-2 border border-border rounded-xl p-6">

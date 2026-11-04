@@ -1,3 +1,4 @@
+import useMemberBalanceUpdates, { withFreshBalance } from '../../hooks/useMemberBalanceUpdates';
 import { useState, useEffect } from 'react';
 import { Play, X, User, Clock, Users, Search, Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -55,6 +56,11 @@ export default function StartSessionForm({ pc, onSuccess }) {
     };
     fetchPlans();
   }, [pc?.id]);
+
+  useMemberBalanceUpdates((u) => {
+    setSelectedMember(m => withFreshBalance(m, u));
+    setSearchResults(list => list.map(m => withFreshBalance(m, u)));
+  });
 
   if (!pc) return null;
 

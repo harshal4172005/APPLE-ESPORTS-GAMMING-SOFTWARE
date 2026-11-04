@@ -468,6 +468,30 @@ public class PublicController : ControllerBase
         return Ok(new { success = true, data = pending });
     }
 
+    /// <summary>The "Change package" list on the gaming PC: the session running on this PC only.</summary>
+    [HttpGet("pcs/{pcId:guid}/package-options")]
+    public async Task<IActionResult> GetPcPackageOptions(Guid pcId, [FromServices] ISessionService sessionService)
+    {
+        var session = await _db.Sessions.AsNoTracking()
+            .Where(s => s.PcId == pcId && s.State == SessionState.Active)
+            .OrderByDescending(s => s.StartTime)
+            .Select(s => new { s.Id, s.BranchId })
+            .FirstOrDefaultAsync();
+        if (session == null)
+            return Ok(new { success = false, error = "There is no running session on this PC." });
+
+        var result = await sessionService.GetPackageOptionsAsync(session.BranchId, session.Id);
+        return Ok(ApiResponse<PackageOptionsDto>.Ok(result));
+    }
+
+    [HttpPost("pcs/{pcId}/decline-package-change")]
+    [Authorize]
+    public async Task<IActionResult> DeclinePackageChange(string pcId, [FromServices] IHubContext<PcOverlayHub> overlayHub)
+    {
+        await overlayHub.Clients.Group($"pc:{pcId}").SendAsync("PackageChangeDeclined", new { reason = "The operator declined the package change." });
+        return Ok(ApiResponse<object>.Ok(null));
+    }
+
     [HttpPost("pcs/{pcId}/decline-walkin")]
     [Authorize]
     public async Task<IActionResult> DeclineWalkinRequest(string pcId, [FromServices] IHubContext<PcOverlayHub> overlayHub)
@@ -691,16 +715,57 @@ public class PublicController : ControllerBase
         if (session == null || session.MemberId != memberId)
             return BadRequest(new { success = false, error = "Session not found or not owned by you." });
 
+        return await CheckoutMemberSessionAsync(session, memberId, sessionService, billingService, billingHub, overlayHub);
+    }
+
+    /// <summary>
+    /// Logout pressed on the gaming PC when the member never signed in on it - the operator started
+    /// their session from the counter, so the PC holds no member token and the token-based checkout
+    /// above could only answer "Not logged in". Keyed on this PC and the session it is showing, the
+    /// same trust as <see cref="ReportPcPoweredOff"/>: it can only end the member session running on
+    /// this very PC, and it bills exactly like a member's own logout. Walk-ins still pay at the counter.
+    /// </summary>
+    [HttpPost("pcs/{pcId:guid}/sessions/{sessionId:guid}/member-logout")]
+    public async Task<IActionResult> MemberLogoutFromPc(
+        Guid pcId, Guid sessionId,
+        [FromServices] ISessionService sessionService,
+        [FromServices] IBillingService billingService,
+        [FromServices] IHubContext<BillingHub> billingHub,
+        [FromServices] IHubContext<PcOverlayHub> overlayHub)
+    {
+        var session = await _db.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId && s.PcId == pcId);
+        if (session?.MemberId is not { } memberId
+            || session.State is not (SessionState.Active or SessionState.Interrupted))
+            return BadRequest(new { success = false, error = "No member session is running on this PC." });
+
+        return await CheckoutMemberSessionAsync(session, memberId, sessionService, billingService, billingHub, overlayHub);
+    }
+
+    private async Task<IActionResult> CheckoutMemberSessionAsync(
+        Session session, Guid memberId,
+        ISessionService sessionService, IBillingService billingService,
+        IHubContext<BillingHub> billingHub, IHubContext<PcOverlayHub> overlayHub)
+    {
+        var sessionId = session.Id;
         var branchId = session.BranchId;
         var sysUsername = $"system_admin_{branchId:N}";
-        var sysOp = await _db.Operators.FirstOrDefaultAsync(o => o.BranchId == branchId && o.Username == sysUsername);
-        if (sysOp == null) return BadRequest(new { success = false, error = "System operator not found." });
+        // Recorded as done by the system operator; a branch that has never needed that account
+        // (every session started at the counter) records the operator who started the session.
+        var actorId = await _db.Operators
+            .Where(o => o.BranchId == branchId && o.Username == sysUsername)
+            .Select(o => (Guid?)o.Id)
+            .FirstOrDefaultAsync() ?? session.OperatorId;
 
-        var activeShift = await _db.Shifts.FirstOrDefaultAsync(s => s.BranchId == branchId && s.Status == ShiftStatus.Active && s.OperatorId == sysOp.Id);
+        // The operator on shift first (same rule as GetShiftIdAsync), the placeholder only if nobody is.
+        var activeShift = await _db.Shifts
+            .Where(s => s.BranchId == branchId && s.Status == ShiftStatus.Active)
+            .OrderBy(s => s.Operator.Username.StartsWith("system_admin_"))
+            .ThenByDescending(s => s.LoginTime)
+            .FirstOrDefaultAsync();
         var shiftId = activeShift?.Id ?? Guid.Empty;
 
         // 1. Stop the session to finalize bill
-        var sessionResult = await sessionService.StopSessionAsync(branchId, sysOp.Id, sessionId, false);
+        var sessionResult = await sessionService.StopSessionAsync(branchId, actorId, sessionId, false);
 
         // 2. Fetch the bill to get the total amount
         var bill = await billingService.GetBillAsync(branchId, sessionResult.BillId);
@@ -719,7 +784,7 @@ public class PublicController : ControllerBase
 
             try
             {
-                var paidBill = await billingService.ProcessPaymentAsync(branchId, sysOp.Id, shiftId, bill.Id, paymentDto);
+                var paidBill = await billingService.ProcessPaymentAsync(branchId, actorId, shiftId, bill.Id, paymentDto);
                 
                 // SignalR updates for Admin dashboards
                 await billingHub.Clients.Group($"branch:{branchId}").SendAsync("WalletApprovalApproved", new { billId = bill.Id });

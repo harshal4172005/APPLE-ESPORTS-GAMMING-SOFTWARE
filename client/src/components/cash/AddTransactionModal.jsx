@@ -7,7 +7,8 @@ const TX_TYPES = {
   inward: { label: 'Cash In', icon: ArrowDownRight, color: 'text-neon-blue', polarity: 1 },
   petty_expense: { label: 'Expense', icon: ArrowUpRight, color: 'text-neon-orange', polarity: -1 },
   withdrawal: { label: 'Owner Takeout', icon: ArrowUpRight, color: 'text-neon-red', polarity: -1 },
-  adjustment: { label: 'Correction', icon: HelpCircle, color: 'text-neon-purple', polarity: 'both' }
+  // No "Correction": the server only records these three (it decides the direction itself), and
+  // End of Day only counts these three - the button only ever showed an error.
 };
 
 export default function AddTransactionModal({ register, onClose, onTransactionAdded }) {

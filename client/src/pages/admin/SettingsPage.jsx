@@ -24,6 +24,8 @@ import AdminsTab from './AdminsTab';
 import PricingProfilesTab from './PricingProfilesTab';
 import FoodSharingTab from './FoodSharingTab';
 import './SettingsPage.css';
+import { reportBranchCommand } from '../../utils/branchCommand';
+import { useSocket } from '../../contexts/SocketContext';
 
 const PERMISSION_KEYS = [
   { id: 'main_dashboard', label: 'Dashboard', desc: 'Summary of active play, operator shift totals' },
@@ -352,8 +354,12 @@ export default function SettingsPage() {
 
     try {
       if (pcDrawer.data) {
-        await updatePc(pcDrawer.data.id, payload);
-        toast.success('PC updated successfully');
+        const result = await updatePc(pcDrawer.data.id, payload);
+        const branchId = pcModal.branch?.id;
+        setPcDrawer({ isOpen: false, data: null });
+        // From Head Office the branch does the edit - say so, and say when it is really done.
+        reportBranchCommand(toast, result, { done: 'PC updated', refresh: () => refreshPcsList(branchId) });
+        return;
       } else {
         const result = await createPc(payload);
         // From Head Office this is queued for the branch to carry out rather than created on
@@ -370,12 +376,22 @@ export default function SettingsPage() {
     }
   };
 
+  // A PC changed at this branch (here, at another counter, or a Head Office edit the branch just
+  // ran): refresh the open fleet list now instead of leaving it stale until reopened.
+  const { subscribe, isHubUp, SIGNALR_HUBS } = useSocket();
+  const fleetBranchId = pcModal.isOpen ? pcModal.branch?.id : null;
+  useEffect(() => {
+    if (!fleetBranchId || !isHubUp(SIGNALR_HUBS.PC_STATUS)) return undefined;
+    return subscribe(SIGNALR_HUBS.PC_STATUS, 'PcManagementUpdated', () => refreshPcsList(fleetBranchId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fleetBranchId, isHubUp, subscribe, SIGNALR_HUBS.PC_STATUS]);
+
   const handleDeletePc = async (pcId) => {
     if (window.confirm('Are you sure you want to delete this PC? This action is soft-deleted.')) {
       try {
-        await deletePc(pcId);
-        toast.success('PC deleted successfully');
-        refreshPcsList(pcModal.branch?.id);
+        const result = await deletePc(pcId);
+        const branchId = pcModal.branch?.id;
+        reportBranchCommand(toast, result, { done: 'PC deleted', refresh: () => refreshPcsList(branchId) });
       } catch (err) {
         toast.error(err.response?.data?.error || 'Failed to delete PC');
       }
@@ -988,6 +1004,16 @@ export default function SettingsPage() {
                               <span className={`status-badge ${p.state?.toLowerCase() === 'idle' ? 'active' : 'suspended'}`}>
                                 {p.state}
                               </span>
+                              {['pending', 'sent'].includes(p.lastBranchCommand?.status) && (
+                                <div className="text-[10px] text-neon-orange mt-0.5">
+                                  {p.lastBranchCommand.type === 'delete_pc' ? 'Deleting' : 'Edit'} — sending to branch…
+                                </div>
+                              )}
+                              {p.lastBranchCommand?.status === 'failed' && (
+                                <div className="text-[10px] text-neon-red mt-0.5 max-w-[160px] whitespace-normal" title={p.lastBranchCommand.message || ''}>
+                                  Branch refused: {p.lastBranchCommand.message || 'no reason given'}
+                                </div>
+                              )}
                             </td>
                             <td className="flex items-center gap-1">
                               <button 

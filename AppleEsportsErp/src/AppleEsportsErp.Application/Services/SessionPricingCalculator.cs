@@ -175,6 +175,21 @@ public static class SessionPricingCalculator
     /// if the session is still free/under-buffer (Gaming = 0), the Food line absorbs
     /// it instead so a free session never appears to have a Gaming charge.
     /// </summary>
+    /// <summary>
+    /// What an extension of <paramref name="minutes"/> costs on this PC: the price of an active
+    /// package of exactly that length if there is one, otherwise the hourly rate pro-rata. Used by
+    /// both the operator's approval card and the charge itself, so the two can never disagree.
+    /// </summary>
+    public static (decimal Amount, AppleEsportsErp.Domain.Entities.PricingPackage? Package) ExtensionPrice(
+        AppleEsportsErp.Domain.Entities.PricingProfile? profile, decimal minutes)
+    {
+        var package = profile?.Packages?
+            .Where(pkg => pkg.IsActive && pkg.DurationMinutes == (int)minutes)
+            .OrderBy(pkg => pkg.SortOrder)
+            .FirstOrDefault();
+        return (package?.Price ?? (minutes / 60m) * (profile?.BaseHourlyRate ?? 0m), package);
+    }
+
     public static (decimal displayGamingAmount, decimal displayFoodAmount, decimal roundedTotal) ComputeRoundedBreakdown(
         decimal gamingAmount, decimal foodAmount, decimal discountAmount)
     {

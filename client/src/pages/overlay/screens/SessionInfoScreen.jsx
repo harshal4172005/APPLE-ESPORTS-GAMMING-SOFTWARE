@@ -254,6 +254,14 @@ export default function SessionInfoScreen() {
             <span className="w-2 h-2 rounded-full bg-neon-green shadow-[0_0_5px_#22d3a6]" />
             <span className="text-neon-green font-body text-sm uppercase tracking-wide font-bold">Session Active</span>
           </div>
+          {!isPayAsYouGo && (
+            <button
+              onClick={() => navigate(`/pc-overlay/${pcId}/extend`)}
+              className="mt-1 text-xs font-body text-accent hover:underline"
+            >
+              Change package ›
+            </button>
+          )}
         </div>
         <div className="flex gap-3">
           {sessionData.memberLinked && (

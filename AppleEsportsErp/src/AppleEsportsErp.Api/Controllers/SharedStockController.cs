@@ -49,7 +49,25 @@ public class SharedStockController : ControllerBase
         public int Quantity { get; set; }
         public int SeedCount { get; set; }
         public bool Replay { get; set; }
+
+        /// <summary>A shift count, not a sale: carries the counter's name so siblings can be told.</summary>
+        public string? CountedByName { get; set; }
     }
+
+    /// <summary>
+    /// How long one count of a shared fridge stands for the whole group. Shifts at the same shop
+    /// close minutes apart (Citylight, 31 Oct 2026: three counters inside eight minutes, each
+    /// "set" wiping the one before). Half an hour covers that and still lets a genuinely later
+    /// shift count the fridge again.
+    /// </summary>
+    /// <summary>
+    /// How far back to look for another counter's count of the same fridge, so this counter can
+    /// be told what they found. Not a block - every branch counts (owner, 4 Nov 2026).
+    /// </summary>
+    public static readonly TimeSpan OneCountStandsFor = TimeSpan.FromMinutes(30);
+
+    /// <summary>What another counter made this item, just before this count.</summary>
+    public sealed record PreviousCount(string? By, DateTimeOffset At, int Count);
 
     [HttpPost("apply")]
     public async Task<IActionResult> Apply([FromBody] ApplyRequest r, CancellationToken ct)
@@ -75,7 +93,7 @@ public class SharedStockController : ControllerBase
         if (fresh == 0)
         {
             var earlier = await _db.SharedStockRequests.AsNoTracking().FirstAsync(q => q.Id == r.RequestId, ct);
-            return Reply(earlier.RefusedReason is null, earlier.ResultCount ?? 0, earlier.RefusedReason);
+            return Reply(earlier.RefusedReason is null, earlier.ResultCount ?? 0, earlier.RefusedReason, null);
         }
 
         // First time Head Office hears of this item: start from the branch's own count.
@@ -86,6 +104,7 @@ public class SharedStockController : ControllerBase
 
         string? refused = null;
         int? count = null;
+        PreviousCount? previous = null;
 
         // While the offline seller is cut off it is the only one selling this fridge; a sale or
         // count anywhere else would be blind to it.
@@ -95,6 +114,20 @@ public class SharedStockController : ControllerBase
             refused = $"{branch.SellerName ?? "The main counter"} has no internet, so the shared fridge is sold only there until it is back.";
         else
         {
+            // Owner's rule (4 Nov 2026): every branch of a shared fridge counts it at its own
+            // shift end - a count is never refused because another counter got there first. What
+            // went wrong at Citylight on 31 Oct was not the second count; it was that each
+            // counter was comparing the shelf against its OWN stale number (144Hz still had 0
+            // while the fridge held 14). So the count applies, and whoever counted before is
+            // reported back so the two numbers can be compared instead of silently overwritten.
+            if (r.Op == "set" && !r.Replay)
+                previous = await _db.SharedStockCounts.AsNoTracking()
+                    .Where(c => c.FoodGroupId == groupId && c.InventoryItemId == r.InventoryItemId
+                                && c.CountedByBranchId != null && c.CountedByBranchId != r.BranchId
+                                && c.CountedAt > DateTimeOffset.UtcNow - OneCountStandsFor)
+                    .Select(c => new PreviousCount(c.CountedByName, c.CountedAt!.Value, c.Count))
+                    .FirstOrDefaultAsync(ct);
+
             var rows = r.Op switch
             {
                 "take" => await _db.Database.SqlQuery<int>($@"
@@ -106,7 +139,8 @@ public class SharedStockController : ControllerBase
                     WHERE ""FoodGroupId"" = {groupId} AND ""InventoryItemId"" = {r.InventoryItemId}
                     RETURNING ""Count"" AS ""Value""").ToListAsync(ct),
                 _ => await _db.Database.SqlQuery<int>($@"
-                    UPDATE shared_stock_counts SET ""Count"" = {r.Quantity}, ""Version"" = nextval('shared_stock_version_seq'), ""UpdatedAt"" = now()
+                    UPDATE shared_stock_counts SET ""Count"" = {r.Quantity}, ""Version"" = nextval('shared_stock_version_seq'), ""UpdatedAt"" = now(),
+                        ""CountedAt"" = now(), ""CountedByBranchId"" = {r.BranchId}, ""CountedByName"" = {r.CountedByName}
                     WHERE ""FoodGroupId"" = {groupId} AND ""InventoryItemId"" = {r.InventoryItemId}
                     RETURNING ""Count"" AS ""Value""").ToListAsync(ct),
             };
@@ -131,7 +165,7 @@ public class SharedStockController : ControllerBase
         await tx.CommitAsync(ct);
 
         if (refused is null) Wake(groupId);
-        return Reply(refused is null, count ?? 0, refused);
+        return Reply(refused is null, count ?? 0, refused, previous);
     }
 
     /// <summary>
@@ -170,7 +204,7 @@ public class SharedStockController : ControllerBase
             group.SellerBranchId,
             group.SellerName,
             version = changed.Count > 0 ? changed.Max(c => c.Version) : since,
-            counts = changed.Select(c => new { c.InventoryItemId, c.Count }),
+            counts = changed.Select(c => new { c.InventoryItemId, c.Count, c.CountedAt, c.CountedByName }),
         }));
     }
 
@@ -206,6 +240,16 @@ public class SharedStockController : ControllerBase
         if (Signals.TryRemove(groupId, out var signal)) signal.TrySetResult();
     }
 
-    private OkObjectResult Reply(bool applied, int count, string? refusedReason) =>
-        Ok(ApiResponse<object>.Ok(new { applied, count, refusedReason }));
+    private OkObjectResult Reply(bool applied, int count, string? refusedReason, PreviousCount? previous) =>
+        Ok(ApiResponse<object>.Ok(new
+        {
+            applied,
+            count,
+            refusedReason,
+            // What another counter made this item moments ago, so this counter can be shown both
+            // numbers instead of one quietly replacing the other.
+            previousCountBy = previous?.By,
+            previousCountAt = previous?.At,
+            previousCount = previous?.Count,
+        }));
 }

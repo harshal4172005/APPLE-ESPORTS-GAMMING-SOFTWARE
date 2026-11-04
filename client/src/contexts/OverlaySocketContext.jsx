@@ -18,6 +18,8 @@ export function useOverlaySocket() {
 
 export function OverlaySocketProvider({ children, pcId, isMinimized: initialMinimized }) {
   const [connection, setConnection] = useState(null);
+  // Last word from the operator on a package-change request: { type: 'changed' | 'declined', at, reason? }
+  const [packageNotice, setPackageNotice] = useState(null);
   const [sessionData, setSessionData] = useState(null);
   const [walkinDeclineEvent, setWalkinDeclineEvent] = useState(null);
   const [foodOrders, setFoodOrders] = useState([]);
@@ -449,6 +451,17 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       setSessionData(null);
     });
 
+    // The member's balance changed at the counter or Head Office (top-up, bonus, admin edit).
+    // Show it now - a raised balance must not keep showing "low balance" until the next poll.
+    newConnection.on('MemberBalanceUpdated', (u) => {
+      setSessionData(prev => prev && prev.memberLinked ? {
+        ...prev,
+        gamingBalance: u?.gamingBalance ?? prev.gamingBalance,
+        foodBalance: u?.foodBalance ?? prev.foodBalance,
+      } : prev);
+      fetchSession({ silent: true });
+    });
+
     newConnection.on('BillUpdated', (update) => {
       setSessionData(prev => prev ? {
         ...prev,
@@ -459,6 +472,15 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
 
     newConnection.on('ExtensionApproved', ({ newRemainingTime }) => {
       setSessionData(prev => prev ? { ...prev, remainingTime: newRemainingTime } : prev);
+    });
+
+    // Package change approved (or made by the operator): the timer and bill are new.
+    newConnection.on('PackageChanged', () => {
+      setPackageNotice({ type: 'changed', at: Date.now() });
+      fetchSession({ silent: true });
+    });
+    newConnection.on('PackageChangeDeclined', ({ reason } = {}) => {
+      setPackageNotice({ type: 'declined', at: Date.now(), reason });
     });
 
     newConnection.on('ExtensionDenied', ({ reason }) => {
@@ -673,6 +695,15 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
     return { success: false, error: 'Not connected' };
   };
 
+  // Ask the operator to move this session to another package. The server checks it and the
+  // operator approves; the customer never changes their own package or price.
+  const requestPackageChange = async (packageId) => {
+    if (connection?.state === 'Connected') {
+      return await connection.invoke('RequestPackageChange', { pcId, packageId });
+    }
+    return { success: false, error: 'Not connected' };
+  };
+
   const requestExtension = async (durationMinutes) => {
     const payload = { pcId, sessionId: sessionData?.sessionId, duration: durationMinutes };
 
@@ -744,16 +775,13 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
     }
   };
 
+  // Ends the member session running on this PC. Keyed on the PC, not the member's token: when
+  // the operator starts a member's session from the counter this PC never gets a token, and a
+  // leftover token from an earlier member must not block Logout either (a 401 here would also
+  // send the whole overlay to the staff login page). Billed exactly like a member's own logout.
   const memberCheckout = async (sessionId) => {
-    const token = localStorage.getItem('memberToken');
-    if (!token) return { success: false, error: 'Not logged in' };
-
     try {
-      const response = await api.post(`/public/sessions/${sessionId}/member-checkout`, {}, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await api.post(`/public/pcs/${pcId}/sessions/${sessionId}/member-logout`, {});
       return response.data;
     } catch (error) {
       console.error('Member checkout error:', error);
@@ -773,6 +801,8 @@ export function OverlaySocketProvider({ children, pcId, isMinimized: initialMini
       emitActivity,
       placeFoodOrder,
       requestExtension,
+      requestPackageChange,
+      packageNotice,
       callOperator,
       requestWalkinSession,
       walkinDeclineEvent,

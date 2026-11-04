@@ -71,6 +71,18 @@ public class BillingController : ControllerBase
         return Ok(ApiResponse<PaginatedResult<BillDto>>.Ok(result));
     }
 
+    /// <summary>PS5 entry from the Cash Desk - operators and Admins, not Super Admin (same rule as the drawer).</summary>
+    [HttpPost("ps5")]
+    [Idempotent]
+    public async Task<IActionResult> CreatePs5Bill([FromBody] CreatePs5BillDto dto)
+    {
+        await this.EnsureNotSuperAdminForCashAsync();
+        var result = await _billingService.CreatePs5BillAsync(
+            GetBranchId(), await this.GetOperatorIdAsync(), await this.GetShiftIdAsync(),
+            User.FindFirstValue(ClaimTypes.Role) ?? Roles.Operator, dto);
+        return Ok(ApiResponse<BillDto>.Ok(result));
+    }
+
     [HttpGet("deferred")]
     public async Task<IActionResult> GetDeferredBills()
     {

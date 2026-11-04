@@ -484,6 +484,11 @@ public class MemberService : IMemberService
 
             if (wallet == WalletType.Gaming) member.GamingBalance = newValue.Value;
             else member.FoodBalance = newValue.Value;
+            // Stamped like every other balance change (WalletService). Without it Head Office and
+            // the other branches only take a balance that is NEWER than their own - so a Super
+            // Admin's 4000 -> 3000 reached the home branch and stopped there; any other branch
+            // the member walked into still showed 4000.
+            member.BalanceAsOf = DateTimeOffset.UtcNow;
 
             changes[$"{wallet}Balance"] = new { before, after = newValue.Value };
 
@@ -563,6 +568,7 @@ public class MemberService : IMemberService
             foodPoints = member.FoodPoints,
             totalPoints = member.TotalPoints,
             updatedAt = member.UpdatedAt,
+            balanceAsOf = member.BalanceAsOf,
         });
 
         await _unitOfWork.CommitTransactionAsync();

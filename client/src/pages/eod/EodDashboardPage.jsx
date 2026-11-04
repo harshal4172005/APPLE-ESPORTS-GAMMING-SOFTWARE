@@ -12,6 +12,9 @@ import { createReport, addStatGrid, addTable, save, ROW_TINT_RED, ROW_TINT_GREEN
 import EodPaymentSummaryBar from '../../components/eod/EodPaymentSummaryBar';
 import { getBranchMaintenanceLogs } from '../../api/maintenanceLogs.api';
 import { currentTradingDayIst, tradingDayRangeIst, toIstDateString } from '../../utils/timeUtils';
+import Ps5LogCard from '../../components/eod/Ps5LogCard';
+import OperatorBoxes from '../../components/eod/OperatorBoxes';
+import { format } from 'date-fns';
 
 /**
  * Buckets bill-like rows (bills, credit clearances, wallet top-ups - anything with a `date`)
@@ -170,6 +173,7 @@ export default function EodDashboardPage() {
 
   const [pcs, setPcs] = useState([]);
   const [allBills, setAllBills] = useState([]);
+  const [ps5Entries, setPs5Entries] = useState([]);
   // Every shift touching this window, so the billing log can be read shift by shift instead of
   // as one undifferentiated list for the whole trading day.
   const [shifts, setShifts] = useState([]);
@@ -225,6 +229,7 @@ export default function EodDashboardPage() {
       setReport(previewData?.data?.data ?? null);
       setPcs(pcsRes.data?.data || []);
       setAllBills(billsRes.data?.data?.allBills || []);
+      setPs5Entries(billsRes.data?.data?.ps5Entries || []);
       setDowntime(billsRes.data?.data?.downtime || []);
       setShifts(billsRes.data?.data?.shifts || []);
       setRangeDaily(billsRes.data?.data?.daily || []);
@@ -484,6 +489,24 @@ export default function EodDashboardPage() {
       rowColor: (rowIndex) => shiftHeaderRows.has(rowIndex) ? ROW_TINT_NEUTRAL : null,
     });
 
+    if (ps5Entries.length > 0) {
+      const t = (k) => ps5Entries.reduce((a, r) => a + Number(r[k] || 0), 0);
+      y = addTable(doc, y, {
+        title, subtitle,
+        heading: `PS5 Transaction Log (${rangeLabel})`,
+        head: ['Date', 'Customer', 'Note', 'Payment', 'Cash', 'Online', 'Credit', 'Total', 'Operator'],
+        body: [
+          ...ps5Entries.map(r => [
+            r.date ? format(new Date(r.date), 'MMM d, hh:mm a') : '-', r.customer, r.note || '-', r.paymentType,
+            `Rs ${Number(r.cash).toFixed(2)}`, `Rs ${Number(r.online).toFixed(2)}`,
+            r.credit > 0 ? `Rs ${Number(r.credit).toFixed(2)}${r.creditStatus === 'cleared' ? ' (cleared)' : ''}` : '-',
+            `Rs ${Number(r.total).toFixed(2)}`, r.operator,
+          ]),
+          ['TOTAL', '', '', '', `Rs ${t('cash').toFixed(2)}`, `Rs ${t('online').toFixed(2)}`, `Rs ${t('credit').toFixed(2)}`, `Rs ${t('total').toFixed(2)}`, ''],
+        ],
+      });
+    }
+
     const eodCreditRows = isRange ? rangeCredits : (report.creditLogs || []);
     y = addTable(doc, y, {
       title, subtitle,
@@ -609,38 +632,7 @@ export default function EodDashboardPage() {
           same Cash/Online/Food figures, same Overall End Total math as EodPaymentSummaryBar.jsx.
           Shown to Admin and Super Admin too (owner's instruction), labelled, so they can check
           exactly what the operator was shown. */}
-      {report && !isRange && (() => {
-        const cashTotal = Number(report.paymentMethods.totalCash) + Number(report.paymentMethods.totalWalletTopUpsCash);
-        const onlineTotal = Number(report.paymentMethods.totalOnline) + Number(report.paymentMethods.totalWalletTopUpsOnline);
-        const grandTotal = cashTotal + onlineTotal
-          - Number(report.cash.totalPettyExpenses) + Number(report.cash.totalCashInwards)
-          - Number(report.cash.totalOwnerWithdrawals);
-        return (
-          <div>
-          {user?.role !== 'operator' && (
-            <div className="text-text-3 text-[11px] uppercase font-bold tracking-widest mb-2">What the operator sees</div>
-          )}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-              <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Total</div>
-              <div className="text-2xl font-mono font-bold text-accent">₹{grandTotal.toFixed(2)}</div>
-            </div>
-            <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-              <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Cash</div>
-              <div className="text-2xl font-mono font-bold text-text">₹{cashTotal.toFixed(2)}</div>
-            </div>
-            <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-              <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Online</div>
-              <div className="text-2xl font-mono font-bold text-text">₹{onlineTotal.toFixed(2)}</div>
-            </div>
-            <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-              <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Food</div>
-              <div className="text-2xl font-mono font-bold text-text">₹{report.revenue.totalFoodRevenue}</div>
-            </div>
-          </div>
-          </div>
-        );
-      })()}
+      {report && !isRange && <OperatorBoxes report={report} showLabel={user?.role !== 'operator'} />}
 
       {/* Missing stock billed to operators - already inside Food and Cash/Online/Credit above,
           listed again so the owner sees who paid for what was missing, and how. */}
@@ -1354,6 +1346,9 @@ export default function EodDashboardPage() {
               )}
             </div>
           </div>
+
+          {/* ── PS5 Transaction Log (own date range) ── */}
+          <Ps5LogCard branchId={targetBranchId} pageFrom={targetDate} pageTo={endDate} />
 
           {/* ── Credit Audit Logs ── */}
           <div className="card bg-bg-2 border border-border p-6 rounded-xl shadow-lg">

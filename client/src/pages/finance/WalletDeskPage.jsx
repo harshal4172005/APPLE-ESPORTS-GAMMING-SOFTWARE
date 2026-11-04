@@ -1,3 +1,4 @@
+import useMemberBalanceUpdates from '../../hooks/useMemberBalanceUpdates';
 import { useState, useEffect, useCallback } from 'react';
 import { Wallet, AlertTriangle, ArrowUpRight, ArrowDownRight, Calendar, Download } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -66,6 +67,8 @@ export default function WalletDeskPage() {
 
   // Safety net so the operator's totals never sit stale against the server's own ledger while
   // the page is left open across a shift - same reasoning and interval as SessionsPage.
+  useMemberBalanceUpdates(() => fetchWalletDesk(true));
+
   useEffect(() => {
     const interval = setInterval(() => fetchWalletDesk(true), 20000);
     return () => clearInterval(interval);

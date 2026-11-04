@@ -57,7 +57,7 @@ public class DashboardService : IDashboardService
         var awaitingPcs = await pcsQuery.CountAsync(p => p.State == PcState.AwaitingBilling);
         var totalActiveSessions = await sessionsQuery.CountAsync(s => s.State == SessionState.Active);
         var activeFoodOrders = await foodOrdersQuery.CountAsync(f => f.Status == OrderStatus.Pending || f.Status == OrderStatus.Preparing);
-        var activeOperators = await operatorsQuery.CountAsync(s => s.Status == ShiftStatus.Active);
+        var activeOperators = await operatorsQuery.CountAsync(s => s.Status == ShiftStatus.Active && !s.Operator.Username.StartsWith("system_admin_"));
 
         // Financials (Cached briefly)
         var todaysBills = await billsQuery.Where(b => b.CompletedAt >= today && b.Status == BillStatus.Completed).ToListAsync();

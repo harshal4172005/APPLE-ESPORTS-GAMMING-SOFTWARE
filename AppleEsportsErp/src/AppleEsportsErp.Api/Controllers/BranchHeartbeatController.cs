@@ -88,8 +88,16 @@ public class BranchHeartbeatController : ControllerBase
     public static readonly TimeSpan MemberPasswordCommandGivenUpAfter = TimeSpan.FromHours(48);
 
     private static TimeSpan GiveUpAfterFor(string commandType) =>
+        // Setup changes keep for 48 hours: they are as right tomorrow morning as they are now,
+        // and a branch switched off overnight answered the 5-minute window by failing every
+        // fleet edit sent while it was shut (Varachha, 30 Oct 2026). Live actions (stop a session,
+        // lock a PC) keep the short window - stale, they would do harm.
         commandType is AppleEsportsErp.Api.Services.BranchCommands.SetMemberPassword
                     or AppleEsportsErp.Api.Services.BranchCommands.GiveMemberBonus
+                    or AppleEsportsErp.Api.Services.BranchCommands.AdminEditMemberValues
+                    or AppleEsportsErp.Api.Services.BranchCommands.UpdatePc
+                    or AppleEsportsErp.Api.Services.BranchCommands.DeletePc
+                    or AppleEsportsErp.Api.Services.BranchCommands.AddPc
             ? MemberPasswordCommandGivenUpAfter
             : CommandGivenUpAfter;
 
@@ -280,7 +288,7 @@ public class BranchHeartbeatController : ControllerBase
             c.Status = BranchCommandStatus.Failed;
             c.CompletedAt = now;
             c.ResultMessage =
-                $"The branch did not pick this up within {giveUpAfter.TotalHours:0} hour(s). " +
+                $"The branch did not pick this up within {(giveUpAfter.TotalHours >= 1 ? $"{giveUpAfter.TotalHours:0} hour(s)" : $"{giveUpAfter.TotalMinutes:0} minutes")}. " +
                 "It is most likely running a version that does not understand this instruction yet.";
 
             _logger.LogWarning(
@@ -353,9 +361,11 @@ public class BranchHeartbeatController : ControllerBase
         // "This branch does not know the command '...' yet." (BranchHeartbeatService's default
         // case). Failing it lost the instruction for good; waiting lets it run once the branch
         // updates, within GiveUpAfterFor's window.
-        // Bonus only - a PC-facing command should still fail fast, someone is watching it.
+        // Fleet and member edits too, not only the bonus: a branch one version behind failed
+        // these for good and the change was simply lost (Varachha, 31 PC edits on 30 Oct 2026).
+        // The screen now shows "Sending to branch..." while it waits, so nobody is left guessing.
         var notYetKnown = !dto.Succeeded
-            && command.CommandType == AppleEsportsErp.Api.Services.BranchCommands.GiveMemberBonus
+            && RetryWhenUnknown.Contains(command.CommandType)
             && dto.Message?.StartsWith("This branch does not know the command", StringComparison.Ordinal) == true;
 
         if (notYetKnown || (!dto.Succeeded && dto.Message == AppleEsportsErp.Api.Services.BranchCommands.MemberNotYetSyncedMessage))
@@ -369,6 +379,12 @@ public class BranchHeartbeatController : ControllerBase
         command.ResultMessage = dto.Message;
         command.CompletedAt = DateTimeOffset.UtcNow;
 
+        // The branch did it - make Head Office's own copy say the same. Nothing else ever told
+        // Head Office: the heartbeat carries a PC's state, never its name/zone/profile or that it
+        // was removed, so the Settings list kept showing the old PC after a successful change.
+        if (dto.Succeeded)
+            await MirrorPcCommandAsync(command, ct);
+
         await _db.SaveChangesAsync(ct);
 
         // What "remote_command_issued" was always missing the other half of: not just that
@@ -379,6 +395,50 @@ public class BranchHeartbeatController : ControllerBase
         await LogCommandOutcomeAsync(command, dto.Succeeded, ct, dto.Message);
 
         return Ok(ApiResponse<object>.Ok(new { received = true }));
+    }
+
+    private static readonly HashSet<string> RetryWhenUnknown = new()
+    {
+        AppleEsportsErp.Api.Services.BranchCommands.GiveMemberBonus,
+        AppleEsportsErp.Api.Services.BranchCommands.UpdatePc,
+        AppleEsportsErp.Api.Services.BranchCommands.DeletePc,
+        AppleEsportsErp.Api.Services.BranchCommands.AddPc,
+        AppleEsportsErp.Api.Services.BranchCommands.AdminEditMemberValues,
+    };
+
+    private async Task MirrorPcCommandAsync(BranchCommand command, CancellationToken ct)
+    {
+        if (command.CommandType == AppleEsportsErp.Api.Services.BranchCommands.UpdatePc)
+        {
+            var edit = JsonSerializer.Deserialize<AppleEsportsErp.Application.DTOs.Settings.UpdatePcCommandDto>(command.Payload, CaseInsensitiveJson);
+            var pc = edit is null ? null : await _db.Pcs.FirstOrDefaultAsync(p => p.Id == edit.Id && p.BranchId == command.BranchId, ct);
+            if (pc != null && edit != null) AppleEsportsErp.Api.Services.PcFleetEdits.ApplyUpdate(pc, edit);
+        }
+        else if (command.CommandType == AppleEsportsErp.Api.Services.BranchCommands.DeletePc)
+        {
+            var del = JsonSerializer.Deserialize<AppleEsportsErp.Application.DTOs.Settings.DeletePcCommandDto>(command.Payload, CaseInsensitiveJson);
+            var pc = del is null ? null : await _db.Pcs.FirstOrDefaultAsync(p => p.Id == del.Id && p.BranchId == command.BranchId, ct);
+            if (pc != null) AppleEsportsErp.Api.Services.PcFleetEdits.MarkDeleted(pc);
+        }
+    }
+
+    /// <summary>
+    /// Whether a command Head Office sent has been done yet, for the screen that sent it - so it
+    /// can say "Sending to branch...", then "Done" or the branch's own reason it refused, instead
+    /// of claiming success the moment the request was queued.
+    /// </summary>
+    [HttpGet("commands/{id:guid}")]
+    [Authorize(Roles = Roles.SuperAdmin + "," + Roles.Admin)]
+    public async Task<IActionResult> CommandStatus(Guid id, CancellationToken ct)
+    {
+        var c = await _db.Set<BranchCommand>().AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (c is null) return NotFound(ApiResponse<object>.Fail("No such command.", "COMMAND_NOT_FOUND"));
+        return Ok(ApiResponse<object>.Ok(new
+        {
+            status = c.Status.ToString().ToLowerInvariant(),
+            message = c.ResultMessage,
+            completedAt = c.CompletedAt,
+        }));
     }
 
     /// <summary>
@@ -835,6 +895,39 @@ public class BranchHeartbeatController : ControllerBase
             .ToListAsync(ct);
 
         var missing = ourPcs.Where(p => !reportedIds.Contains(p.Id)).ToList();
+        if (missing.Count == 0) return;
+
+        // Removed on purpose, not lost: the branch stopped reporting it because a delete was sent.
+        // Re-adding it every 15 minutes failed on the branch's own deleted row forever (Katargam
+        // 360Hz: 226 failed add_pc for PC 01) and would have brought the PC back if it ever worked.
+        // A delete the branch confirmed also closes Head Office's own copy, healing older ones.
+        var deletes = await _db.Set<BranchCommand>()
+            .Where(c => c.BranchId == dto.BranchId
+                && c.CommandType == AppleEsportsErp.Api.Services.BranchCommands.DeletePc
+                && c.Status != BranchCommandStatus.Failed)
+            .Select(c => new { c.Payload, c.Status })
+            .ToListAsync(ct);
+        var deletedIds = new HashSet<Guid>();
+        var confirmedDeletedIds = new HashSet<Guid>();
+        foreach (var d in deletes)
+        {
+            try
+            {
+                if (JsonSerializer.Deserialize<AppleEsportsErp.Application.DTOs.Settings.DeletePcCommandDto>(d.Payload, CaseInsensitiveJson)?.Id is { } id)
+                {
+                    deletedIds.Add(id);
+                    if (d.Status == BranchCommandStatus.Succeeded) confirmedDeletedIds.Add(id);
+                }
+            }
+            catch (JsonException) { }
+        }
+        if (confirmedDeletedIds.Count > 0)
+        {
+            foreach (var pc in await _db.Pcs.Where(p => confirmedDeletedIds.Contains(p.Id) && !p.IsDeleted).ToListAsync(ct))
+                AppleEsportsErp.Api.Services.PcFleetEdits.MarkDeleted(pc);
+            await _db.SaveChangesAsync(ct);
+        }
+        missing = missing.Where(p => !deletedIds.Contains(p.Id)).ToList();
         if (missing.Count == 0) return;
 
         var recentCutoff = DateTimeOffset.UtcNow - MissingPcRetryEvery;

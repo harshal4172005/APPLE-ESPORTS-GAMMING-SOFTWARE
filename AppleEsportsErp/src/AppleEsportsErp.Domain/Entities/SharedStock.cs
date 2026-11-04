@@ -16,6 +16,16 @@ public class SharedStockCount
     public long Version { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>
+    /// One fridge, one count. When a branch records a shift count ("set"), these say who did it
+    /// and when, so the other counters in the group are told "already counted by X" instead of
+    /// each overwriting the others (Citylight, 31 Oct 2026: three counters in eight minutes left
+    /// Diet Coke reading "system 0, 14 extra").
+    /// </summary>
+    public DateTimeOffset? CountedAt { get; set; }
+    public Guid? CountedByBranchId { get; set; }
+    public string? CountedByName { get; set; }
 }
 
 /// <summary>

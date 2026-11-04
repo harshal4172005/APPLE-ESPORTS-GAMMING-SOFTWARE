@@ -184,6 +184,71 @@ public class BillingService : IBillingService
         return dto;
     }
 
+    /// <summary>
+    /// PS5 play is entered by hand at the Cash Desk (the owner's client asked for it, alongside
+    /// PS5 sessions, which stay as they are). It is an ordinary bill on purpose: a gaming line, no
+    /// PC and no session, numbered PS5-... so it can be told apart. Being a bill, it is paid through
+    /// the same payment code as every other (cash into the drawer, online, split, credit with the
+    /// Credits page to clear it), counts as Gaming revenue in End of Day, and syncs to Head Office -
+    /// with no new money arithmetic anywhere to get wrong or count twice.
+    /// </summary>
+    public async Task<BillDto> CreatePs5BillAsync(Guid branchId, Guid operatorId, Guid shiftId, string actorRole, CreatePs5BillDto dto)
+    {
+        RefuseIfHeadOffice("created");
+
+        var amount = Math.Round(dto.Amount, 2);
+        if (amount <= 0) throw new AppException("Enter the PS5 amount.");
+        if (string.IsNullOrWhiteSpace(dto.CustomerName)) throw new AppException("Enter the customer's name.");
+
+        var now = DateTimeOffset.UtcNow;
+        var note = string.IsNullOrWhiteSpace(dto.Note) ? null : dto.Note.Trim();
+        var bill = new Bill
+        {
+            Id = Guid.NewGuid(),
+            BillNumber = $"PS5-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..4].ToUpper()}",
+            BranchId = branchId,
+            OperatorId = operatorId,
+            ShiftId = shiftId == Guid.Empty ? null : shiftId,
+            CustomerName = dto.CustomerName.Trim(),
+            GamingAmount = amount,
+            FoodAmount = 0,
+            Subtotal = amount,
+            TotalAmount = amount,
+            Status = BillStatus.Pending,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        bill.Items.Add(new BillItem
+        {
+            Id = Guid.NewGuid(),
+            BillId = bill.Id,
+            ItemType = "gaming",
+            ItemName = note is null ? "PS5" : $"PS5 - {note}",
+            Quantity = 1,
+            UnitPrice = amount,
+            TotalPrice = amount,
+            CreatedAt = now,
+        });
+
+        await _unitOfWork.Repository<Bill>().AddAsync(bill);
+        await _unitOfWork.SaveChangesAsync();
+
+        await _auditService.LogAsync(new AuditEntry
+        {
+            OperatorId = operatorId,
+            UserId = operatorId,
+            UserRole = actorRole,
+            UserName = string.Empty,
+            Action = AuditActions.Ps5EntryCreated,
+            BranchId = branchId,
+            TargetType = "bill",
+            TargetId = bill.Id,
+            Details = new { bill.BillNumber, Amount = amount, bill.CustomerName, dto.CustomerPhone, Note = note, ShiftId = bill.ShiftId },
+        });
+
+        return await GetBillAsync(branchId, bill.Id);
+    }
+
     public async Task<BillDto> ApplyDiscountAsync(Guid branchId, Guid actorId, string actorRole, Guid id, ApplyDiscountDto dto)
     {
         RefuseIfHeadOffice("discounted");
@@ -247,7 +312,12 @@ public class BillingService : IBillingService
             ? preDiscountTotal * (dto.DiscountValue / 100m)
             : dto.DiscountValue;
 
-        if (discountAmount > preDiscountTotal)
+        // A fixed ₹ discount given while the session is still running is meant for the final
+        // bill, which is still growing - ₹40 off a session that has only reached ₹10 so far must
+        // not be refused. The total is floored at ₹0 here and again at stop.
+        var flatOnRunningSession = dto.DiscountType == DiscountType.Flat
+            && bill.Session?.State == Domain.Enums.SessionState.Active;
+        if (discountAmount < 0 || (discountAmount > preDiscountTotal && !flatOnRunningSession))
             throw new AppException("Discount amount cannot exceed the bill's total.");
 
         decimal roundedTotal = Math.Max(0m, Math.Round(preDiscountTotal - discountAmount, 2));
@@ -522,6 +592,11 @@ public class BillingService : IBillingService
                 OldOnlineAmount = oldOnlineAmount,
                 NewOnlineAmount = dto.OnlineAmount,
                 Reason = dto.Reason,
+                // Whether a drawer moved with it. False when cash changed but the drawer the bill
+                // was paid into is already closed - End of Day's Cash box follows the edit, the
+                // counted drawer cannot, and EOD says how many of those there were.
+                CashChanged = cashDelta != 0,
+                DrawerMoved = activeRegister != null,
             }
         });
 

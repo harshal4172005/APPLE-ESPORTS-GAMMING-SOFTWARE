@@ -94,9 +94,12 @@ public class SharedStockWatcher : BackgroundService
         await using var scope = _services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var branchId = await db.Branches.AsNoTracking().OrderBy(b => b.Id).Select(b => b.Id).FirstOrDefaultAsync(ct);
+        var branch = await db.Branches.AsNoTracking().OrderBy(b => b.Id)
+            .Select(b => new { b.Id, b.Name }).FirstOrDefaultAsync(ct);
+        var branchId = branch?.Id ?? Guid.Empty;
         if (branchId == Guid.Empty) return false;   // not adopted yet
         SharedStockGate.BranchId = branchId;
+        SharedStockGate.BranchName = branch!.Name;
 
         var saved = await db.Set<SystemConfig>().AsNoTracking()
             .Where(c => c.ConfigKey == MembershipKey).Select(c => c.ConfigValue).FirstOrDefaultAsync(ct);
@@ -153,6 +156,8 @@ public class SharedStockWatcher : BackgroundService
                 if (SharedStockGate.IsInFlight(c.InventoryItemId)) { skipped = true; continue; }
 
                 var item = await db.InventoryItems.AsNoTracking().FirstOrDefaultAsync(i => i.Id == c.InventoryItemId, ct);
+                if (c.CountedAt is { } countedAt)
+                    SharedStockGate.LastCount[c.InventoryItemId] = (countedAt, c.CountedByName);
                 if (item is null || item.CurrentStock == c.Count) continue;
                 SharedStockGate.SetAvailability(item, c.Count);
 
@@ -217,5 +222,7 @@ public class SharedStockWatcher : BackgroundService
     {
         public Guid InventoryItemId { get; set; }
         public int Count { get; set; }
+        public DateTimeOffset? CountedAt { get; set; }
+        public string? CountedByName { get; set; }
     }
 }

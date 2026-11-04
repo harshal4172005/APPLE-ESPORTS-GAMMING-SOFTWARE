@@ -61,8 +61,11 @@ export default function EodPaymentSummaryBar({ report, targetDate, height, onHei
   // counter - two counters, one till. Top-ups are split by how they were actually paid (the
   // server tracks this per row) rather than lumped into cash regardless of method, which used
   // to overstate the drawer by the full value of every UPI top-up.
-  const cashTotal = n(pm.totalCash) + n(pm.totalWalletTopUpsCash);
-  const onlineTotal = n(pm.totalOnline) + n(pm.totalWalletTopUpsOnline);
+  // The server's operatorBoxes add up every source (bills, credits paid off, top-ups, reservation
+  // deposits) - the same figures as the operator boxes on the EOD page. Older server: as before.
+  const ob = report.operatorBoxes;
+  const cashTotal = ob ? n(ob.cash) : n(pm.totalCash) + n(pm.totalWalletTopUpsCash);
+  const onlineTotal = ob ? n(ob.online) : n(pm.totalOnline) + n(pm.totalWalletTopUpsOnline);
 
   // Credit and Credit Cleared used to be shown as rows here too, unsummed - moved up to their
   // own two boxes on the stat grid above instead (EodDashboardPage.jsx), rather than sitting

@@ -465,6 +465,20 @@ public class AuthService : IAuthService
         // The exception is an operator resuming their OWN open shift, above: that shift already
         // exists and cannot be taken back. There the blocking screen is all there is.
 
+        // 5c. The hidden "System Administrator" placeholder (Super Admin / member actions while
+        //     nobody was on shift) ends here: a real operator is at the counter now and takes
+        //     over from it. It has no drawer, so there is nothing to count - it is just closed.
+        var placeholders = await _db.Shifts
+            .Where(s => s.BranchId == dto.BranchId && s.Status == ShiftStatus.Active
+                        && s.Operator.Username.StartsWith("system_admin_"))
+            .ToListAsync();
+        foreach (var p in placeholders)
+        {
+            p.Status = ShiftStatus.Completed;
+            p.LogoutTime = DateTimeOffset.UtcNow;
+            p.ClosedByOperatorId = op.Id;
+        }
+
         // 6. Update operator status to active
         op.Status = OperatorStatus.Active;
         op.LastLogin = DateTimeOffset.UtcNow;

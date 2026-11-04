@@ -29,9 +29,10 @@ public class WalletService : IWalletService
 
     private readonly IOutboxService _outbox;
 
-    public WalletService(IUnitOfWork unitOfWork, IAuditService auditService, IEmailService emailService, IConfiguration configuration, IAppUrlProvider appUrls, ILogger<WalletService> logger, IOutboxService outbox, IAdminNotifier adminNotifier)
+    public WalletService(IUnitOfWork unitOfWork, IAuditService auditService, IEmailService emailService, IConfiguration configuration, IAppUrlProvider appUrls, ILogger<WalletService> logger, IOutboxService outbox, IAdminNotifier adminNotifier, IHubNotificationService hubNotifications)
     {
         _adminNotifier = adminNotifier;
+        _hubNotifications = hubNotifications;
         _unitOfWork = unitOfWork;
         _auditService = auditService;
         _emailService = emailService;
@@ -42,6 +43,17 @@ public class WalletService : IWalletService
     }
 
     private readonly IAdminNotifier _adminNotifier;
+    private readonly IHubNotificationService _hubNotifications;
+
+    /// <summary>
+    /// Tells every screen at this branch, and the member's own gaming PC, that the balance just
+    /// changed. Only after the money is committed, and never allowed to fail the money itself.
+    /// </summary>
+    private async Task AnnounceBalanceAsync(Guid branchId, Guid memberId)
+    {
+        try { await _hubNotifications.BroadcastMemberBalanceUpdateAsync(branchId, memberId); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Balance-changed push for member {MemberId} failed.", memberId); }
+    }
 
     /// <summary>
     /// Same as AuthService.ShareMemberResetTokenAsync, duplicated rather than shared because that
@@ -272,6 +284,7 @@ public class WalletService : IWalletService
         });
 
         await _unitOfWork.CommitTransactionAsync();
+        await AnnounceBalanceAsync(branchId, member.Id);
 
         await SendTopUpEmailsAsync(member, dto.Amount, bonusAmount, totalCredit);
 
@@ -373,6 +386,7 @@ public class WalletService : IWalletService
             });
 
             await _unitOfWork.CommitTransactionAsync();
+            await AnnounceBalanceAsync(branchId, memberId);
             return MapToDto(walletTx);
         }
         catch
@@ -463,6 +477,7 @@ public class WalletService : IWalletService
         if (commit)
         {
             await _unitOfWork.CommitTransactionAsync();
+            await AnnounceBalanceAsync(branchId, memberId);
         }
 
         return MapToDto(walletTx);

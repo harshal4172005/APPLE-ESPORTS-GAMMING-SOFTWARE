@@ -86,17 +86,21 @@ export default function GlobalNotificationListener() {
     });
 
     const unsubscribeExtension = subscribe(SIGNALR_HUBS.SESSIONS, 'ExtensionRequested', async (data) => {
-      let pcName = data.pcId || data.PcId;
+      // The server now sends the PC number, customer and price with the request. Looking the PC
+      // up is only needed for an older server that sent a bare id.
+      let pcName = data.pcNumber || data.PcNumber || data.pcId || data.PcId;
       let branchName = "";
       let ratePerHour = 0;
-      try {
-        const res = await api.get(`/public/pcs/${pcName}`);
-        if (res.data.success) {
-            pcName = res.data.data.name;
-            branchName = res.data.data.branchName || "";
-            ratePerHour = res.data.data.ratePerHour ?? 0;
-        }
-      } catch (e) { }
+      if (!(data.pcNumber || data.PcNumber)) {
+        try {
+          const res = await api.get(`/public/pcs/${pcName}`);
+          if (res.data.success) {
+              pcName = res.data.data.name;
+              branchName = res.data.data.branchName || "";
+              ratePerHour = res.data.data.ratePerHour ?? 0;
+          }
+        } catch (e) { }
+      }
 
       const isAdminOrSuperAdmin = user?.role === 'admin' || user?.role === 'super_admin';
       const alertBranchId = data.branchId || data.BranchId;
@@ -113,10 +117,26 @@ export default function GlobalNotificationListener() {
       toast.info(`Time extension request from ${pcName}`);
     });
 
+    // A customer asks to move to another package (priced and checked by the server already).
+    const unsubscribePackage = subscribe(SIGNALR_HUBS.SESSIONS, 'PackageChangeRequested', (data) => {
+      const isAdminOrSuperAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+      const alertBranchId = data.branchId || data.BranchId;
+      if (isAdminOrSuperAdmin && alertBranchId && activeBranch?.id && String(alertBranchId).toLowerCase() !== String(activeBranch.id).toLowerCase()) {
+        return;
+      }
+      setRequests(prev => {
+        const pcId = data.pcId || data.PcId;
+        const filtered = prev.filter(r => !((r.pcId || r.PcId) === pcId && r.type === 'PackageChangeRequested'));
+        return [...filtered, { ...data, type: 'PackageChangeRequested', resolvedPcName: data.pcNumber }];
+      });
+      toast.info(`Package change request from ${data.pcNumber}`);
+    });
+
     return () => {
       unsubscribe();
       if (unsubscribeStatus) unsubscribeStatus();
       if (unsubscribeExtension) unsubscribeExtension();
+      if (unsubscribePackage) unsubscribePackage();
     };
   }, [connected, subscribe, SIGNALR_HUBS.NOTIFICATIONS, SIGNALR_HUBS.PC_STATUS, SIGNALR_HUBS.SESSIONS, toast, user, activeBranch]);
 
@@ -126,6 +146,19 @@ export default function GlobalNotificationListener() {
       const pcId = req.pcId || req.PcId;
       const customerName = req.customerName || req.CustomerName;
       const duration = req.duration || req.Duration || 0;
+
+      if (req.type === 'PackageChangeRequested') {
+        const res = await api.post(`/sessions/${req.sessionId}/change-package`, { packageId: req.packageId }, {
+          headers: { 'X-Branch-Id': req.branchId }
+        });
+        if (res.data.success) {
+          toast.success(`${req.pcNumber}: now ${req.toName}`);
+          window.dispatchEvent(new CustomEvent('refresh-pcs', { detail: { pcId } }));
+        }
+        setRequests(prev => prev.filter(r => !((r.pcId || r.PcId) === pcId && r.type === 'PackageChangeRequested')));
+        setIsProcessing(false);
+        return;
+      }
 
       if (req.type === 'ExtensionRequested') {
         const sessionId = req.sessionId || req.SessionId;
@@ -141,12 +174,13 @@ export default function GlobalNotificationListener() {
             console.warn('Failed to fetch session rate, using PricingProfile rate');
         }
         
-        const expectedAmount = duration ? (duration / 60) * ratePerHour : 0;
-        
-        const extendRes = await api.post(`/sessions/${sessionId}/extend`, { 
+        // Informational only - the server prices the extension itself (same function as the card).
+        const expectedAmount = req.expectedAmount ?? req.ExpectedAmount ?? (duration ? (duration / 60) * ratePerHour : 0);
+
+        const extendRes = await api.post(`/sessions/${sessionId}/extend`, {
             AdditionalMinutes: duration,
             AdditionalAmount: expectedAmount,
-            PackageName: req.packageName || req.PackageName || 'Extension'
+            PackageName: `Extension - ${duration}m`
         }, {
             headers: { 'X-Branch-Id': req.branchId || req.BranchId }
         });
@@ -200,7 +234,11 @@ export default function GlobalNotificationListener() {
     try {
       const pcId = req.pcId || req.PcId;
       const branchId = req.branchId || req.BranchId;
-      if (req.type === 'ExtensionRequested') {
+      if (req.type === 'PackageChangeRequested') {
+        await api.post(`/public/pcs/${pcId}/decline-package-change`, {}, { headers: { 'X-Branch-Id': branchId } });
+        setRequests(prev => prev.filter(r => !((r.pcId || r.PcId) === pcId && r.type === 'PackageChangeRequested')));
+        toast.info(`Declined package change for ${req.pcNumber}`);
+      } else if (req.type === 'ExtensionRequested') {
         setRequests(prev => prev.filter(r => (r.pcId || r.PcId) !== pcId));
         toast.info(`Declined extension for ${pcId}`);
       } else {
@@ -228,11 +266,17 @@ export default function GlobalNotificationListener() {
       <AnimatePresence>
         {requests.map((req) => {
           const isExtension = req.type === 'ExtensionRequested';
+          const isPackage = req.type === 'PackageChangeRequested';
+          const hm = (m) => `${Math.floor(m / 60)} hr${m % 60 ? ` ${m % 60} min` : ''}`;
           const isOperatorCall = req.type === 'OperatorCall';
           const pcId = req.pcId || req.PcId;
           const pcName = req.resolvedPcName || pcId;
-          const customerName = req.customerName || req.CustomerName || 'Current User';
+          const customerName = req.customerName || req.CustomerName || 'Walk-in';
           const duration = req.duration || req.Duration || 0;
+          const billNumber = req.billNumber || req.BillNumber;
+          const serverPrice = req.expectedAmount ?? req.ExpectedAmount;
+          const durationLabel = duration === 0 ? 'Pay As You Go'
+            : duration % 60 === 0 ? `${duration / 60} Hr` : `${duration} Min`;
           return (
             <motion.div
               key={pcId + req.type}
@@ -247,18 +291,44 @@ export default function GlobalNotificationListener() {
                 </div>
                 <div>
                   <h3 className="font-heading font-bold text-text uppercase tracking-widest text-sm">
-                    {isOperatorCall ? 'Operator Call' : isExtension ? 'Time Extension' : 'Walk-in Request'}
+                    {isOperatorCall ? 'Operator Call' : isPackage ? 'Package Change' : isExtension ? 'Time Extension' : 'Walk-in Request'}
                   </h3>
+                  {isExtension || isPackage ? (
+                    <>
+                      <p className="text-text font-heading font-bold text-base mt-0.5">
+                        <span className="text-accent">{pcName}</span> — {customerName}
+                      </p>
+                      {billNumber && <p className="text-text-3 font-mono text-[10px]">{billNumber}</p>}
+                    </>
+                  ) : (
                   <p className="text-text-2 font-body text-xs mt-0.5">
                     Station <span className="text-accent font-semibold">{pcName}</span>
                     {req.resolvedBranchName && (
                       <span className="text-text-3"> • {req.resolvedBranchName}</span>
                     )}
                   </p>
+                  )}
                 </div>
               </div>
 
-              {!isOperatorCall && (
+              {isPackage && (
+              <div className="bg-bg-3 border border-border p-3 rounded-md mb-5 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-text-3 font-body text-xs">Package</span>
+                  <span className="text-text font-bold font-heading">{req.fromName} → {req.toName}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-text-3 font-body text-xs">Bill</span>
+                  <span className="font-mono font-bold text-sm text-accent">₹{Number(req.fromPrice).toFixed(0)} → ₹{Number(req.toPrice).toFixed(0)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-text-3 font-body text-xs">Time</span>
+                  <span className="text-text font-mono text-sm">Played {hm(req.playedMinutes)} · {hm(req.minutesLeftAfter)} left</span>
+                </div>
+              </div>
+              )}
+
+              {!isOperatorCall && !isPackage && (
               <div className="bg-bg-3 border border-border p-3 rounded-md mb-5">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-text-3 font-body text-xs">Customer</span>
@@ -267,13 +337,15 @@ export default function GlobalNotificationListener() {
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-text-3 font-body text-xs">Duration</span>
                   <span className="text-text font-mono font-bold text-sm">
-                    {duration === 0 ? 'Pay As You Go' : `${duration >= 60 ? duration / 60 : duration} ${duration === 30 ? 'Min' : 'Hr'}`}
+                    {durationLabel}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-text-3 font-body text-xs">Expected Bill</span>
                   <span className="text-text font-mono font-bold text-sm text-accent">
-                    {duration === 0 ? 'Variable' : `₹${(duration / 60) * (req.resolvedRatePerHour || 100)}`}
+                    {duration === 0 ? 'Variable'
+                      : serverPrice != null ? `₹${Number(serverPrice).toFixed(0)}`
+                      : `₹${(duration / 60) * (req.resolvedRatePerHour || 100)}`}
                   </span>
                 </div>
               </div>

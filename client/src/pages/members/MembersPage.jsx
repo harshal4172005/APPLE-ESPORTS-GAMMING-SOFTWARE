@@ -1,3 +1,5 @@
+import useMemberBalanceUpdates from '../../hooks/useMemberBalanceUpdates';
+import { reportBranchCommand } from '../../utils/branchCommand';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Users, Plus, Search, Wallet, Phone, Mail, Clock,
@@ -556,10 +558,10 @@ function AdminEditValuesModal({ member, onClose, onSuccess }) {
         totalPoints: Math.round(Number(values.totalPoints)),
         reason: reason.trim() || undefined,
       };
-      await adminEditMemberValues(member.id, payload);
-      toast.success(`${member.fullName}'s profile values updated`);
-      onSuccess();
+      const result = await adminEditMemberValues(member.id, payload);
       onClose();
+      // From Head Office the branch applies it: "Sending to branch..." then "Applied", or why not.
+      reportBranchCommand(toast, result, { done: `${member.fullName}'s values updated`, refresh: onSuccess });
     } catch (err) {
       setError(err.response?.data?.error || err.response?.data?.message || 'Failed to save changes');
     } finally {
@@ -1295,6 +1297,9 @@ export default function MembersPage() {
   // Paused while the tab is hidden, so a dashboard left open overnight is not polling into an
   // empty room. Whatever page and search the operator is on is preserved: a refresh that
   // silently threw them back to page one mid-task would be its own bug.
+  // A balance changed anywhere at this branch: show it now, not on the next 15 s tick.
+  useMemberBalanceUpdates(() => fetchMembers(pagination.page, search, true));
+
   useEffect(() => {
     const REFRESH_EVERY_MS = 15000;
 

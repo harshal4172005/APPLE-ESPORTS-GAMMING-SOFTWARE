@@ -165,6 +165,7 @@ public class UpdatePcDto
     public string? Specs { get; set; }
     public string? Zone { get; set; }
     public string? HardwareNotes { get; set; }
+    public Guid? PricingProfileId { get; set; }
 }
 
 /// <summary>UpdatePcDto plus the id of the PC being edited, for the branch_commands payload - see BranchCommands.UpdatePc.</summary>

@@ -36,6 +36,21 @@ public static class SharedStockGate
     public static volatile SharedStockMembership? Membership;
     public static string? HeadOfficeUrl;
     public static Guid BranchId;
+    /// <summary>This branch's own name, so the other counters can be told who counted the fridge.</summary>
+    public static volatile string? BranchName;
+
+    /// <summary>
+    /// Why a shift count did not change the shared fridge ("already counted by X", or no line to
+    /// Head Office). Set during the save, read by the stock-count screen straight after, so the
+    /// operator is told instead of quietly keeping a number that was never used.
+    /// </summary>
+    public static readonly System.Threading.AsyncLocal<List<string>?> CountNotes = new();
+
+    /// <summary>
+    /// Who last counted each shared item and when, as Head Office last said. Read by the stock
+    /// count screen so a counter is told "already counted by X" before it asks for a number.
+    /// </summary>
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (DateTimeOffset At, string? By)> LastCount = new();
 
     /// <summary>Whether the last call to Head Office got through. Drives the "not live" banner.</summary>
     public static volatile bool Online = true;
@@ -117,7 +132,8 @@ public static class SharedStockGate
 
             Hold(entry.Entity.Id);
             held.Add(entry.Entity.Id);
-            var answer = await SendAsync(Guid.NewGuid(), entry.Entity.Id, op, qty, before, replay: false, ct);
+            var answer = await SendAsync(Guid.NewGuid(), entry.Entity.Id, op, qty, before, replay: false, ct,
+                countedByName: op == "set" ? BranchName : null);
 
             if (answer.Outcome == Outcome.Applied)
             {
@@ -132,7 +148,16 @@ public static class SharedStockGate
             // block the whole shift handover it is part of, cash count included. Head Office's
             // number replaces it here as soon as the line is back (SharedStockWatcher).
             if (op == "set" && (answer.Outcome == Outcome.Refused || !IsSeller))
+            {
+                // Not applied, so this branch must not keep its own number either - the fridge is
+                // whatever Head Office says. Put the item back and tell the operator why.
+                stock.CurrentValue = answer.Outcome == Outcome.Refused ? answer.Count : before;
+                SetAvailability(entry.Entity, stock.CurrentValue);
+                CountNotes.Value?.Add(answer.Outcome == Outcome.Refused
+                    ? $"{entry.Entity.ItemName}: {answer.Reason}"
+                    : $"{entry.Entity.ItemName}: no line to Head Office, so the shared fridge was not changed.");
                 continue;
+            }
 
             if (answer.Outcome == Outcome.Refused)
             {
@@ -168,6 +193,47 @@ public static class SharedStockGate
         return applied;
     }
 
+    /// <summary>
+    /// Head Office's live count of every shared item, asked for right now.
+    ///
+    /// The count screen needs this before it shows "system says": the root of the Citylight mess
+    /// on 31 Oct was 144Hz comparing the shelf against its own copy, which still said 0 while the
+    /// fridge held 14 - so a correct count of 14 was reported as "14 extra". The watcher keeps
+    /// this up to date in the background; this asks once more at the only moment it has to be right.
+    /// Empty when there is no line to Head Office: the screen then says so.
+    /// </summary>
+    public static async Task<Dictionary<Guid, int>> LiveCountsAsync(CancellationToken ct)
+    {
+        var live = new Dictionary<Guid, int>();
+        if (Membership is null || HeadOfficeUrl is null) return live;
+        try
+        {
+            var reply = await Http.GetFromJsonAsync<WatchEnvelope>(
+                $"{HeadOfficeUrl}/api/shared-stock/watch?branchId={BranchId}&since=0", ct);
+            foreach (var c in reply?.Data?.Counts ?? new List<WatchCount>())
+            {
+                live[c.InventoryItemId] = c.Count;
+                if (c.CountedAt is { } at) LastCount[c.InventoryItemId] = (at, c.CountedByName);
+            }
+            Online = true;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            Online = false;
+        }
+        return live;
+    }
+
+    private sealed class WatchEnvelope { public WatchBody? Data { get; set; } }
+    private sealed class WatchBody { public List<WatchCount>? Counts { get; set; } }
+    private sealed class WatchCount
+    {
+        public Guid InventoryItemId { get; set; }
+        public int Count { get; set; }
+        public DateTimeOffset? CountedAt { get; set; }
+        public string? CountedByName { get; set; }
+    }
+
     public static string OfflineMessage(SharedStockMembership m) =>
         $"No internet - the shared fridge is sold only at {m.SellerName ?? "the main counter"} until it is back.";
 
@@ -196,7 +262,8 @@ public static class SharedStockGate
     /// made offline, or an undo): apply it even below zero, never refuse it.
     /// </summary>
     public static async Task<Answer> SendAsync(
-        Guid requestId, Guid itemId, string op, int qty, int seedCount, bool replay, CancellationToken ct)
+        Guid requestId, Guid itemId, string op, int qty, int seedCount, bool replay, CancellationToken ct,
+        string? countedByName = null)
     {
         try
         {
@@ -209,14 +276,23 @@ public static class SharedStockGate
                 quantity = qty,
                 seedCount,
                 replay,
+                countedByName,
             }, ct);
 
             if (!response.IsSuccessStatusCode) { Online = false; return new Answer(Outcome.Unreachable); }
 
             var body = await response.Content.ReadFromJsonAsync<Envelope>(cancellationToken: ct);
             Online = true;
-            return body?.Data is not { } d ? new Answer(Outcome.Unreachable)
-                : d.Applied ? new Answer(Outcome.Applied, d.Count)
+            if (body?.Data is not { } d) return new Answer(Outcome.Unreachable);
+
+            // Another counter counted the same fridge minutes ago and made it something else.
+            // Both numbers are put in front of this operator rather than one silently winning.
+            if (d.PreviousCountBy is { } who && d.PreviousCount is { } theirs && theirs != qty)
+                CountNotes.Value?.Add(
+                    $"{who} counted {theirs} at {AppleEsportsErp.Application.Services.IndiaTime.Format(d.PreviousCountAt!.Value)}; "
+                    + $"you counted {qty}. The fridge is now {d.Count} - check the shelf if that looks wrong.");
+
+            return d.Applied ? new Answer(Outcome.Applied, d.Count)
                 : new Answer(Outcome.Refused, d.Count, d.RefusedReason);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
@@ -239,5 +315,8 @@ public static class SharedStockGate
         public bool Applied { get; set; }
         public int Count { get; set; }
         public string? RefusedReason { get; set; }
+        public string? PreviousCountBy { get; set; }
+        public DateTimeOffset? PreviousCountAt { get; set; }
+        public int? PreviousCount { get; set; }
     }
 }

@@ -142,6 +142,38 @@ public class EodController : ControllerBase
         .OrderByDescending(b => b.Date)
         .ToList();
 
+        // PS5 entries from the Cash Desk (bills numbered PS5-...): already inside AllBills and every
+        // total above, like any bill. Listed again on their own, with how each was paid, for the
+        // PS5 log - display only, never added to anything.
+        var ps5Bills = bills.Where(b => b.BillNumber.StartsWith("PS5-")).ToList();
+        var ps5BillIds = ps5Bills.Select(b => b.Id).ToList();
+        var ps5Notes = ps5BillIds.Count == 0 ? new Dictionary<Guid, string>()
+            : await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.BillItem>().Query().AsNoTracking()
+                .Where(i => ps5BillIds.Contains(i.BillId))
+                .GroupBy(i => i.BillId)
+                .Select(g => new { g.Key, Name = g.Select(i => i.ItemName).FirstOrDefault() })
+                .ToDictionaryAsync(x => x.Key, x => x.Name ?? "");
+        var ps5Entries = ps5Bills.Select(b =>
+        {
+            var credit = billCredits.FirstOrDefault(c => c.BillId == b.Id);
+            var note = ps5Notes.GetValueOrDefault(b.Id, "");
+            return new
+            {
+                BillNumber = b.BillNumber,
+                Date = b.CompletedAt,
+                Customer = b.CustomerName ?? "Walk-in",
+                Note = note.StartsWith("PS5 - ") ? note[6..] : "",
+                PaymentType = credit != null ? (b.CashAmount + b.OnlineAmount > 0 ? "Split + Credit" : "Credit") : (b.PaymentType?.ToString() ?? "Unknown"),
+                Cash = b.CashAmount,
+                Online = b.OnlineAmount,
+                Credit = credit?.CreditAmount ?? 0m,
+                CreditStatus = credit?.Status,
+                Discount = b.DiscountAmount,
+                Total = b.TotalAmount,
+                Operator = b.Operator != null ? b.Operator.FullName : "Unknown",
+            };
+        }).OrderByDescending(e => e.Date).ToList();
+
         var credits = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.CustomerCredit>()
             .Query()
             .Include(c => c.Bill)
@@ -321,6 +353,7 @@ public class EodController : ControllerBase
             Monthly = monthlyReport,
             Discounts = discountAudit,
             AllBills = combinedBills,
+            Ps5Entries = ps5Entries,
             AllCredits = allCredits,
             Downtime = downtimeRows,
             DowntimeTotalMinutes = Math.Round(downtime.Sum(d => d.DurationSeconds) / 60.0, 0),

@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useOverlaySocket } from '../../../contexts/OverlaySocketContext';
 import { Clock, Loader2, CheckCircle2 } from 'lucide-react';
+import ChangePackageSection from '../components/ChangePackageSection';
 
 export default function TimeExtensionScreen() {
   const { requestExtension, sessionData } = useOverlaySocket();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState(null);
 
   const durationOptions = [
     { label: '30 Min', value: 30 },
@@ -16,11 +18,14 @@ export default function TimeExtensionScreen() {
 
   const handleRequest = async (minutes) => {
     setIsSubmitting(true);
+    setError(null);
     try {
       const res = await requestExtension(minutes);
-      if (res.success) {
+      if (res?.success) {
         setSuccess(true);
         setTimeout(() => setSuccess(false), 3000);
+      } else {
+        setError(res?.error || 'The request could not be sent. Please call the operator.');
       }
     } catch (err) {
       console.error(err);
@@ -63,7 +68,7 @@ export default function TimeExtensionScreen() {
   }
 
   return (
-    <div className="p-6 h-full flex flex-col">
+    <div className="p-6 h-full flex flex-col overflow-y-auto">
       <div className="mb-8">
         <h2 className="font-heading text-2xl font-bold text-text tracking-wider uppercase flex items-center gap-2">
           <Clock className="w-6 h-6 text-accent" />
@@ -72,7 +77,11 @@ export default function TimeExtensionScreen() {
         <p className="text-text-2 font-body text-sm mt-2">Request more gaming time. Charges will be added to your current bill upon approval.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 flex-1">
+      {error && (
+        <p className="mb-4 text-sm text-neon-red font-body">{error}</p>
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
         {durationOptions.map((opt) => (
           <button
             key={opt.value}
@@ -87,6 +96,8 @@ export default function TimeExtensionScreen() {
           </button>
         ))}
       </div>
+
+      <ChangePackageSection />
 
       {isSubmitting && (
         <div className="absolute inset-0 bg-bg/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">

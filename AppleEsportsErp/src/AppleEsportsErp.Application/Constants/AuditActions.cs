@@ -17,6 +17,7 @@ public static class AuditActions
     public const string SessionStart = "session_start";
     public const string SessionStop = "session_stop";
     public const string SessionExtend = "session_extend";
+    public const string SessionPackageChange = "session_package_change";
     public const string SessionTransfer = "session_transfer";
     public const string SessionResume = "session_resume";
 
@@ -31,6 +32,7 @@ public static class AuditActions
     public const string BillCreate = "bill_create";
     public const string BillComplete = "bill_complete";
     public const string PaymentProcess = "payment_process";
+    public const string Ps5EntryCreated = "ps5_entry_created";
     public const string DiscountApply = "discount_apply";
     public const string PaymentMethodEdit = "payment_method_edit";
 

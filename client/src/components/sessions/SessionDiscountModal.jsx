@@ -4,23 +4,21 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Tag } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { applyDiscount } from '../../api/billing.api';
-
-const DISCOUNT_OPTIONS = [
-  { label: 'NONE', value: 0, type: 'Percentage' },
-  { label: '5% OFF', value: 5, type: 'Percentage' },
-  { label: '10% OFF', value: 10, type: 'Percentage' },
-  { label: '15% OFF', value: 15, type: 'Percentage' },
-  { label: '20% OFF', value: 20, type: 'Percentage' },
-];
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function SessionDiscountModal({ isOpen, onClose, pc, onRefresh }) {
-  const [selectedDiscount, setSelectedDiscount] = useState(0);
+  // A typed ₹ amount, not a percent: it stays exactly that amount however long they keep playing.
+  const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const toast = useToast();
+  const { isTrueSuperAdmin } = useAuth();
+  const value = Number(amount);
+  const valid = amount !== '' && Number.isFinite(value) && value > 0;
 
   if (!isOpen || !pc) return null;
 
-  const handleApply = async () => {
+  // remove = true clears the discount (₹0).
+  const handleApply = async (remove = false) => {
     if (!pc.activeBillId) {
       toast.error('No active bill found for this session.');
       return;
@@ -28,16 +26,16 @@ export default function SessionDiscountModal({ isOpen, onClose, pc, onRefresh })
 
     setLoading(true);
     try {
-      const opt = DISCOUNT_OPTIONS.find(o => o.value === selectedDiscount);
+      const rupees = remove ? 0 : value;
       const result = await applyDiscount(pc.activeBillId, {
-        discountType: opt.type,
-        discountValue: opt.value,
-        reason: 'Session Discount applied by Admin'
+        discountType: 'Flat',
+        discountValue: rupees,
+        reason: `${isTrueSuperAdmin ? 'Super Admin' : 'Admin'} discount ₹${rupees}`,
       });
       toast.success(
         result?.queued
           ? (result.message || 'Sent to the branch. It applies this within a few seconds.')
-          : `Discount ${opt.label !== 'NONE' ? opt.label : 'removed'} applied successfully!`
+          : remove ? 'Discount removed.' : `₹${rupees} discount applied.`
       );
       onRefresh?.();
       onClose();
@@ -81,28 +79,42 @@ export default function SessionDiscountModal({ isOpen, onClose, pc, onRefresh })
               Apply a discount to the active session on <span className="text-neon-orange font-bold font-mono">{pc.name}</span>.
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              {DISCOUNT_OPTIONS.map((opt) => (
-                <button
-                  key={opt.label}
-                  onClick={() => setSelectedDiscount(opt.value)}
-                  className={`py-2 px-1 rounded border text-xs font-mono font-bold tracking-wider transition-all duration-200 ${
-                    selectedDiscount === opt.value
-                      ? 'bg-neon-orange/20 border-neon-orange text-neon-orange shadow-[0_0_10px_rgba(255,87,34,0.3)]'
-                      : 'bg-bg border-border text-text-3 hover:bg-bg-3 hover:border-border/80'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            <label className="block">
+              <span className="text-xs text-text-3 uppercase tracking-wider font-bold">Discount amount (₹)</span>
+              <div className="mt-1 flex items-center gap-2 bg-bg border border-border rounded px-3 focus-within:border-neon-orange">
+                <span className="text-neon-orange font-mono font-bold">₹</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  autoFocus
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && valid && !loading) handleApply(); }}
+                  placeholder="e.g. 40"
+                  className="w-full bg-transparent py-2.5 font-mono text-lg text-text outline-none"
+                />
+              </div>
+              <span className="block mt-1 text-[11px] text-text-3">
+                The customer pays this much less. It stays the same even if they keep playing.
+              </span>
+            </label>
 
             <button
-              onClick={handleApply}
+              onClick={() => handleApply(true)}
               disabled={loading}
+              className="w-full py-2 rounded border border-border text-text-3 text-xs font-bold tracking-widest hover:bg-bg-3 disabled:opacity-50 uppercase"
+            >
+              Remove discount
+            </button>
+
+            <button
+              onClick={() => handleApply()}
+              disabled={loading || !valid}
               className="w-full py-3 rounded border border-pc-active/50 bg-pc-active/10 text-pc-active font-bold tracking-widest hover:bg-pc-active/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase"
             >
-              {loading ? 'APPLYING...' : 'APPLY DISCOUNT'}
+              {loading ? 'APPLYING...' : valid ? `GIVE ₹${value} DISCOUNT` : 'APPLY DISCOUNT'}
             </button>
           </div>
         </motion.div>

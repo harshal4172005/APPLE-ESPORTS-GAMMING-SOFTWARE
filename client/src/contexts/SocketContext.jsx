@@ -167,6 +167,11 @@ export function SocketProvider({ children }) {
             logout();
             window.location.href = '/?reason=forced_logout';
           });
+          // Any screen holding a member re-reads its balance - see useMemberBalanceUpdates.
+          notifHub.on('MemberBalanceUpdated', (envelope) => {
+            const detail = envelope?.payload ?? envelope;
+            window.dispatchEvent(new CustomEvent('member-balance-updated', { detail }));
+          });
           notifHub.on('PermissionsUpdated', () => {
             console.log('Permissions updated by admin. Refreshing user profile...');
             fetchCurrentUser();

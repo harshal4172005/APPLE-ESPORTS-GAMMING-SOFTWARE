@@ -778,8 +778,211 @@ public class InventoryController : ControllerBase
         }));
     }
 
-    public record StockCountLineRequest(Guid InventoryId, int Counted);
-    public record StockCountRequest(string Kind, Guid? CashRegisterId, List<StockCountLineRequest> Counts);
+    /// <summary>
+    /// <paramref name="SystemWas"/> is what this screen showed when the operator opened it. Without
+    /// it a sale made while they were counting looked like the operator miscounting ("I counted 28
+    /// water, it showed 27"). Null from an older screen - then it is simply not reported.
+    /// </summary>
+    public record StockCountLineRequest(Guid InventoryId, int Counted, int? SystemWas = null);
+    public record StockCountRequest(string Kind, Guid? CashRegisterId, List<StockCountLineRequest> Counts, DateTimeOffset? OpenedAt = null);
+
+    /// <summary>
+    /// Menu Editor's stock answer for a date range, per item and in total: how much the admin
+    /// refilled, how much sold, what the counts corrected, and what is unaccounted for.
+    ///
+    /// The owner's question in his own words: "900 sold this month and admin put 950 in stock,
+    /// where did 50 go?". Read from inventory_logs, which is every movement of every item, so
+    /// the four numbers always add up to the stock on the shelf:
+    ///   opening + refilled - sold + corrections = closing.
+    /// "Missing" is what the shift counts had to take off (a negative correction) - stock that
+    /// left without being sold.
+    /// </summary>
+    [HttpGet("stock-summary")]
+    [Authorize(Roles = Roles.SuperAdmin + "," + Roles.Admin)]
+    public async Task<IActionResult> StockSummary(
+        [FromQuery] DateTimeOffset? from, [FromQuery] DateTimeOffset? to, [FromQuery] Guid? branchId = null)
+    {
+        var targetBranchId = branchId
+            ?? (Guid.TryParse(HttpContext.Items["BranchId"]?.ToString(), out var b) ? b : Guid.Empty);
+        if (targetBranchId == Guid.Empty)
+            return BadRequest(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Fail("Pick a branch first."));
+
+        var now = DateTimeOffset.UtcNow;
+        var fromUtc = (from ?? new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero)).ToUniversalTime();
+        var toUtc = (to ?? now).ToUniversalTime();
+
+        var items = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryItem>().Query().AsNoTracking()
+            .Where(i => i.BranchId == targetBranchId)
+            .Select(i => new { i.Id, i.ItemName, i.Category, i.Price, i.CurrentStock, i.Status })
+            .ToListAsync();
+
+        var logs = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryLog>().Query().AsNoTracking()
+            .Where(l => l.BranchId == targetBranchId && l.CreatedAt >= fromUtc && l.CreatedAt <= toUtc)
+            .Select(l => new { l.InventoryId, l.Action, l.Quantity, l.OldValue, l.NewValue, l.CreatedAt, l.OperatorId, l.Reason })
+            .ToListAsync();
+
+        // Owner's rule (4 Nov 2026): if the missing stock can be traced, trace it - this is when
+        // it went, and whose shift it went on. Every count that found less than the shelf should
+        // have held, newest first, so "where did 50 go" has an answer and not just a number.
+        var whoById = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Operator>().Query().AsNoTracking()
+            .Where(o => o.BranchId == targetBranchId)
+            .ToDictionaryAsync(o => o.Id, o => o.FullName);
+
+        // Where the shelf stood when the range began: today's number, with every movement inside
+        // the range taken back off. Nothing to guess and nothing to store.
+        static int Delta(string action, int? qty, string? oldValue, string? newValue)
+        {
+            if (action == "refill") return qty ?? 0;
+            if (action == "sale") return -Math.Abs(qty ?? 0);
+            if (action == "discrepancy")
+                return qty ?? (int.TryParse(newValue, out var n) && int.TryParse(oldValue, out var o) ? n - o : 0);
+            return 0;
+        }
+
+        var rows = items.Select(i =>
+        {
+            var mine = logs.Where(l => l.InventoryId == i.Id).ToList();
+            var refilled = mine.Where(l => l.Action == "refill").Sum(l => l.Quantity ?? 0);
+            var sold = mine.Where(l => l.Action == "sale").Sum(l => Math.Abs(l.Quantity ?? 0));
+            var corrections = mine.Where(l => l.Action == "discrepancy")
+                .Sum(l => Delta(l.Action, l.Quantity, l.OldValue, l.NewValue));
+            var movement = mine.Sum(l => Delta(l.Action, l.Quantity, l.OldValue, l.NewValue));
+            var opening = i.CurrentStock - movement;
+
+            return new
+            {
+                inventoryId = i.Id,
+                itemName = i.ItemName,
+                i.Category,
+                i.Price,
+                opening,
+                refilled,
+                sold,
+                corrections,                                  // negative = the count found less
+                shouldBe = opening + refilled - sold,
+                actual = i.CurrentStock,
+                missing = Math.Max(0, -corrections),          // stock that left without being sold
+                extra = Math.Max(0, corrections),
+                missingValue = Math.Max(0, -corrections) * i.Price,
+                status = i.Status.ToString(),
+            };
+        }).OrderBy(r => r.Category).ThenBy(r => r.itemName).ToList();
+
+        var byId = items.ToDictionary(i => i.Id);
+        var wentMissing = logs
+            .Where(l => l.Action == "discrepancy" && Delta(l.Action, l.Quantity, l.OldValue, l.NewValue) < 0)
+            .OrderByDescending(l => l.CreatedAt)
+            .Select(l =>
+            {
+                var short_ = -Delta(l.Action, l.Quantity, l.OldValue, l.NewValue);
+                byId.TryGetValue(l.InventoryId, out var it);
+                return new
+                {
+                    at = l.CreatedAt,
+                    itemName = it?.ItemName ?? "Unknown item",
+                    quantity = short_,
+                    value = short_ * (it?.Price ?? 0m),
+                    countedBy = l.OperatorId is { } op && whoById.TryGetValue(op, out var who) ? who : null,
+                    was = l.OldValue,
+                    found = l.NewValue,
+                    l.Reason,
+                };
+            })
+            .ToList();
+
+        return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new
+        {
+            from = fromUtc,
+            to = toUtc,
+            hasHistory = logs.Count > 0,
+            wentMissing,
+            totals = new
+            {
+                // What was already on the shelf when the range started, kept apart from what the
+                // admin put in, so "you added 10, 5 were already there, 15 were available" reads
+                // off the page without arithmetic (owner, 4 Nov 2026).
+                opening = rows.Sum(r => r.opening),
+                available = rows.Sum(r => r.opening + r.refilled),
+                refilled = rows.Sum(r => r.refilled),
+                sold = rows.Sum(r => r.sold),
+                missing = rows.Sum(r => r.missing),
+                extra = rows.Sum(r => r.extra),
+                missingValue = rows.Sum(r => r.missingValue),
+            },
+            items = rows,
+        }));
+    }
+
+    /// <summary>
+    /// What to put in front of the operator at a shift count: every item, what the system holds
+    /// right now, and - for a shared fridge - whether another counter has already counted it.
+    /// One physical fridge is counted once (SharedStockController.OneCountStandsFor).
+    /// </summary>
+    [HttpGet("stock-count/sheet")]
+    [Authorize(Roles = Roles.SuperAdmin + "," + Roles.Admin + "," + Roles.Operator)]
+    public async Task<IActionResult> StockCountSheet()
+    {
+        var branchId = Guid.TryParse(HttpContext.Items["BranchId"]?.ToString(), out var b) ? b : Guid.Empty;
+        var items = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryItem>().Query().AsNoTracking()
+            .Where(i => i.BranchId == branchId && i.Status != AppleEsportsErp.Domain.Enums.FoodAvailability.Disabled)
+            .OrderBy(i => i.Category).ThenBy(i => i.ItemName)
+            .Select(i => new { i.Id, i.ItemName, i.Category, i.CurrentStock })
+            .ToListAsync();
+
+        var shared = AppleEsportsErp.Infrastructure.Data.SharedStockGate.Membership != null;
+        var stands = AppleEsportsErp.Api.Controllers.SharedStockController.OneCountStandsFor;
+        var now = DateTimeOffset.UtcNow;
+
+        // Every branch of a shared fridge counts it (owner, 4 Nov 2026). What each one must NOT
+        // do is count against its own stale copy - that is what turned a correct count of 14 into
+        // "system 0, 14 extra" at Citylight. So "system says" comes from Head Office, live.
+        var live = shared
+            ? await AppleEsportsErp.Infrastructure.Data.SharedStockGate.LiveCountsAsync(HttpContext.RequestAborted)
+            : new Dictionary<Guid, int>();
+        var fridgeLive = !shared || AppleEsportsErp.Infrastructure.Data.SharedStockGate.Online;
+
+        // Written into this branch's own row, not just shown. What the operator is charged for is
+        // worked out at save time from CurrentStock, so if the screen said 14 (Head Office) while
+        // the row still said 0, a correct count of 14 would raise a bill for stock that is on the
+        // shelf. Straight to the table, like SharedStockWatcher: this is Head Office's number
+        // arriving, not a change this branch made, so it must not be sent back.
+        foreach (var i in items)
+        {
+            if (!live.TryGetValue(i.Id, out var real) || real == i.CurrentStock) continue;
+            if (AppleEsportsErp.Infrastructure.Data.SharedStockGate.IsInFlight(i.Id)) continue;
+            await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryItem>().Query()
+                .Where(x => x.Id == i.Id)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.CurrentStock, real)
+                    .SetProperty(x => x.UpdatedAt, DateTimeOffset.UtcNow));
+        }
+
+        return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new
+        {
+            openedAt = now,
+            sharedFridge = shared,
+            fridgeLive,
+            items = items.Select(i =>
+            {
+                var other = shared
+                    && AppleEsportsErp.Infrastructure.Data.SharedStockGate.LastCount.TryGetValue(i.Id, out var last)
+                    && now - last.At < stands
+                    && !string.Equals(last.By, AppleEsportsErp.Infrastructure.Data.SharedStockGate.BranchName, StringComparison.Ordinal)
+                    ? last : ((DateTimeOffset At, string? By)?)null;
+                return new
+                {
+                    inventoryId = i.Id,
+                    itemName = i.ItemName,
+                    i.Category,
+                    system = live.TryGetValue(i.Id, out var s) ? s : i.CurrentStock,
+                    shared = shared && live.ContainsKey(i.Id),
+                    // Information, not a block: this counter still counts the shelf themselves.
+                    lastCountedBy = other?.By,
+                    lastCountedAt = other?.At,
+                };
+            }),
+        }));
+    }
 
     /// <summary>
     /// A shift's whole stock count in one go - the shift-start and shift-end counts. Every item
@@ -820,13 +1023,28 @@ public class InventoryController : ControllerBase
             .Where(r => r.BranchId == branchId && r.Status != AppleEsportsErp.Domain.Enums.CashRegisterStatus.Closed)
             .OrderByDescending(r => r.OpenedAt).Select(r => (Guid?)r.Id).FirstOrDefaultAsync();
 
+        // Anything the shared fridge refuses (already counted by another counter, or no line to
+        // Head Office) is collected here by SharedStockGate during the save and reported back.
+        AppleEsportsErp.Infrastructure.Data.SharedStockGate.CountNotes.Value = new List<string>();
+
         var lines = new List<object>();
         var missing = new List<(AppleEsportsErp.Domain.Entities.InventoryItem Item, int Missing)>();
         foreach (var count in request.Counts)
         {
             var item = items.FirstOrDefault(i => i.Id == count.InventoryId);
             if (item is null) continue;
-            lines.Add(new { inventoryId = item.Id, itemName = item.ItemName, system = item.CurrentStock, counted = count.Counted });
+            // Sold (or delivered) between the screen opening and Confirm. Reported so the operator
+            // is never told they miscounted when the shelf genuinely moved under them.
+            var movedWhileCounting = count.SystemWas is { } was ? item.CurrentStock - was : 0;
+            lines.Add(new
+            {
+                inventoryId = item.Id,
+                itemName = item.ItemName,
+                system = item.CurrentStock,
+                systemWas = count.SystemWas,
+                movedWhileCounting,
+                counted = count.Counted,
+            });
             if (count.Counted < item.CurrentStock) missing.Add((item, item.CurrentStock - count.Counted));
             if (count.Counted == item.CurrentStock) continue;
 
@@ -884,14 +1102,52 @@ public class InventoryController : ControllerBase
             OperatorName = name,
             Kind = opening ? "opening" : "closing",
             CountedAt = now,
+            OpenedAt = request.OpenedAt,
             ShortageBillId = shortageBill?.Id,
             Lines = System.Text.Json.JsonSerializer.Serialize(lines),
         });
         await _unitOfWork.SaveChangesAsync();
 
+        var sharedNotes = AppleEsportsErp.Infrastructure.Data.SharedStockGate.CountNotes.Value ?? new List<string>();
+        AppleEsportsErp.Infrastructure.Data.SharedStockGate.CountNotes.Value = null;
+
+        // Owner's rule (4 Nov 2026): when a count comes up short, find where it went first - and
+        // only charge for what cannot be explained. Every movement of a short item since the last
+        // count is listed, so a sale at 4:52 PM is visible instead of the operator simply paying.
+        // Every item whose shelf does not match what the operator was shown - whether that ended
+        // in a bill or was explained by a sale. "Where did it go" has to be answerable either way.
+        var shortIds = missing.Select(m => m.Item.Id)
+            .Concat(request.Counts.Where(c => c.SystemWas is { } w && c.Counted != w).Select(c => c.InventoryId))
+            .Distinct().ToList();
+        var since = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.StockCount>().Query().AsNoTracking()
+            .Where(c => c.BranchId == branchId && c.CountedAt < now)
+            .OrderByDescending(c => c.CountedAt).Select(c => (DateTimeOffset?)c.CountedAt).FirstOrDefaultAsync()
+            ?? now.AddHours(-24);
+        var trail = shortIds.Count == 0 ? new List<object>()
+            : (await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.InventoryLog>().Query().AsNoTracking()
+                // Not "discrepancy": that is this count's own correction, not where the stock went.
+                .Where(l => shortIds.Contains(l.InventoryId) && l.Action != "discrepancy"
+                            && l.CreatedAt >= since && l.CreatedAt <= now)
+                .OrderBy(l => l.CreatedAt)
+                .Select(l => new { l.InventoryId, l.Action, l.Quantity, l.CreatedAt, l.Reason })
+                .ToListAsync())
+              .Select(l => (object)new
+              {
+                  inventoryId = l.InventoryId,
+                  itemName = items.FirstOrDefault(i => i.Id == l.InventoryId)?.ItemName,
+                  what = l.Action == "sale" ? "sold" : l.Action == "refill" ? "added" : l.Action,
+                  quantity = Math.Abs(l.Quantity ?? 0),
+                  at = l.CreatedAt,
+                  l.Reason,
+              }).ToList();
+
         return Ok(AppleEsportsErp.Application.DTOs.Common.ApiResponse<object>.Ok(new
         {
             lines,
+            sharedNotes,
+            // Where the short stock went, if anywhere: shown before the operator pays.
+            trail,
+            trailSince = since,
             shortage = shortageBill is null ? null : new
             {
                 shortageBill.BillNumber,

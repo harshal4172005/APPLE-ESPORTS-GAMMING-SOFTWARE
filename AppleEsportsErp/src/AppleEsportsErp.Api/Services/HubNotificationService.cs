@@ -271,5 +271,22 @@ public class HubNotificationService : IHubNotificationService
         // PermissionsUpdated), and every screen already connects to it via SocketContext.jsx.
         await _notificationHub.Clients.Group($"branch:{branchId}")
             .SendAsync("MemberBalanceUpdated", new EventEnvelope<object>(payload));
+
+        // And the member's own gaming PC, if they are playing: its screen otherwise only saw a
+        // new balance on its next poll, and a raised balance could still show "low balance".
+        var db = scope.ServiceProvider.GetRequiredService<AppleEsportsErp.Infrastructure.Data.AppDbContext>();
+        var pcIds = await db.Sessions.AsNoTracking()
+            .Where(s => s.MemberId == memberId
+                        && (s.State == AppleEsportsErp.Domain.Enums.SessionState.Active
+                            || s.State == AppleEsportsErp.Domain.Enums.SessionState.Interrupted))
+            .Select(s => s.PcId)
+            .ToListAsync();
+        foreach (var pcId in pcIds)
+            await _pcOverlayHub.Clients.Group($"pc:{pcId}").SendAsync("MemberBalanceUpdated", new
+            {
+                memberId,
+                gamingBalance = member?.GamingBalance,
+                foodBalance = member?.FoodBalance,
+            });
     }
 }

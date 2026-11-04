@@ -425,7 +425,10 @@ public class ShiftTakeoverService : IShiftTakeoverService
         var candidates = await _db.Shifts
             .Where(s => s.BranchId == branchId
                      && s.Status == ShiftStatus.Active
-                     && s.OperatorId != excludeOperatorId)
+                     && s.OperatorId != excludeOperatorId
+                     // The hidden placeholder for Super Admin/member actions is nobody's shift
+                     // and has no drawer; it is closed at login, never counted.
+                     && !s.Operator.Username.StartsWith("system_admin_"))
             .ToListAsync(ct);
 
         if (candidates.Count == 0) return new List<(Shift, DateTimeOffset)>();

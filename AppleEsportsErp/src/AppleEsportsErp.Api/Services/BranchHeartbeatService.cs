@@ -148,7 +148,8 @@ public class BranchHeartbeatService : BackgroundService
         // operator's own status flag. A flag can be left behind by a crash; an open shift is
         // the thing the shop is actually working against.
         var onDuty = await db.Shifts.AsNoTracking()
-            .Where(s => s.BranchId == branchId && s.Status == ShiftStatus.Active)
+            .Where(s => s.BranchId == branchId && s.Status == ShiftStatus.Active
+                        && !s.Operator.Username.StartsWith("system_admin_"))
             .Join(db.Operators.AsNoTracking(), s => s.OperatorId, o => o.Id,
                   (s, o) => new OperatorOnDutyDto
                   {
@@ -523,7 +524,8 @@ public class BranchHeartbeatService : BackgroundService
 
         var shift = await db.Shifts.AsNoTracking()
             .Where(s => s.BranchId == pc.BranchId && s.Status == ShiftStatus.Active)
-            .OrderByDescending(s => s.LoginTime)
+            .OrderBy(s => s.Operator.Username.StartsWith("system_admin_"))
+            .ThenByDescending(s => s.LoginTime)
             .FirstOrDefaultAsync(ct);
 
         if (shift is null)
@@ -658,7 +660,8 @@ public class BranchHeartbeatService : BackgroundService
         // ... UserName" and nothing was saved, stock included.
         var onShiftOperatorId = await db.Shifts.AsNoTracking()
             .Where(s => s.BranchId == item.BranchId && s.Status == ShiftStatus.Active)
-            .OrderByDescending(s => s.LoginTime)
+            .OrderBy(s => s.Operator.Username.StartsWith("system_admin_"))
+            .ThenByDescending(s => s.LoginTime)
             .Select(s => (Guid?)s.OperatorId)
             .FirstOrDefaultAsync(ct);
 
@@ -831,8 +834,12 @@ public class BranchHeartbeatService : BackgroundService
             // local one: WalletTransaction.AdminId is FK'd to this branch's own `users` table,
             // which has never heard of a Head Office account, so writing adminId there failed
             // outright on every single remote balance edit. See that method's own comment.
+            // This branch's own id, not the member's home branch: a member with no home branch
+            // (or one from another shop) put the wallet entry under an empty branch and sent the
+            // "balance changed" push to a group nobody is in, so no screen here ever updated.
+            var thisBranchId = await db.Branches.Select(b => b.Id).FirstAsync(ct);
             var result = await memberService.AdminEditValuesAsync(
-                member.HomeBranchId ?? Guid.Empty, adminId, memberId, dto, adminName ?? "Head Office");
+                thisBranchId, adminId, memberId, dto, adminName ?? "Head Office");
 
             return (true, $"Updated at this branch. Gaming balance now Rs {result.GamingBalance}.");
         }
@@ -986,7 +993,8 @@ public class BranchHeartbeatService : BackgroundService
     {
         var onShift = await db.Shifts.AsNoTracking()
             .Where(s => s.BranchId == branchId && s.Status == ShiftStatus.Active)
-            .OrderByDescending(s => s.LoginTime)
+            .OrderBy(s => s.Operator.Username.StartsWith("system_admin_"))
+            .ThenByDescending(s => s.LoginTime)
             .Select(s => (Guid?)s.OperatorId)
             .FirstOrDefaultAsync(ct);
 
@@ -1361,17 +1369,13 @@ public class BranchHeartbeatService : BackgroundService
         if (exists)
             return (false, $"PC number {dto.PcNumber} already exists at this branch.");
 
-        var isConsole = string.Equals(dto.Zone, "Console", StringComparison.OrdinalIgnoreCase);
+        if (dto.PricingProfileId is { } profileId
+            && !await db.PricingProfiles.AnyAsync(p => p.Id == profileId, ct))
+            return (false, "That pricing profile does not exist at this branch.");
 
-        pc.PcNumber = dto.PcNumber;
-        pc.PcName = dto.PcName ?? dto.PcNumber;
-        pc.IpAddress = isConsole ? null : dto.IpAddress;
-        pc.Specs = dto.Specs ?? "{}";
-        pc.Zone = dto.Zone ?? "Standard";
-        pc.HardwareNotes = dto.HardwareNotes;
-        pc.UpdatedAt = DateTimeOffset.UtcNow;
-
+        PcFleetEdits.ApplyUpdate(pc, dto);
         await db.SaveChangesAsync(ct);
+        await BroadcastFleetChangeAsync(scoped, pc.BranchId, pc.Id, "updated");
 
         return (true, $"{pc.PcNumber} updated.");
     }
@@ -1407,12 +1411,22 @@ public class BranchHeartbeatService : BackgroundService
         if (pc is null)
             return (true, "Already removed from this branch - nothing to do.");
 
-        pc.IsDeleted = true;
-        pc.UpdatedAt = DateTimeOffset.UtcNow;
+        // Head Office could not see that this PC is in use; the branch can.
+        if (PcFleetEdits.DeleteBlockedReason(pc) is { } blocked)
+            return (false, blocked);
 
+        PcFleetEdits.MarkDeleted(pc);
         await db.SaveChangesAsync(ct);
+        await BroadcastFleetChangeAsync(scoped, pc.BranchId, pc.Id, "deleted");
 
         return (true, $"{pc.PcNumber} removed from the fleet.");
+    }
+
+    /// <summary>Sessions grid and Settings fleet list refresh now instead of on their next poll.</summary>
+    private static async Task BroadcastFleetChangeAsync(IServiceProvider scoped, Guid branchId, Guid pcId, string action)
+    {
+        try { await scoped.GetRequiredService<IHubNotificationService>().BroadcastPcManagementUpdateAsync(branchId, pcId, action); }
+        catch { /* a missed refresh is not worth failing the change over */ }
     }
 
     private static async Task<(bool, string)> RunStopSessionAsync(
@@ -1678,7 +1692,8 @@ public class BranchHeartbeatService : BackgroundService
 
         var actorId = await db.Shifts.AsNoTracking()
             .Where(s => s.BranchId == pc.BranchId && s.Status == ShiftStatus.Active)
-            .OrderByDescending(s => s.LoginTime)
+            .OrderBy(s => s.Operator.Username.StartsWith("system_admin_"))
+            .ThenByDescending(s => s.LoginTime)
             .Select(s => (Guid?)s.OperatorId)
             .FirstOrDefaultAsync(ct)
             ?? pc.LastOperatorId;
@@ -1970,8 +1985,24 @@ public class BranchHeartbeatService : BackgroundService
             {
                 using var scope = _serviceProvider.CreateAsyncScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var balanceBefore = await db.Members.AsNoTracking().Where(m => m.Id == item.Id)
+                    .Select(m => new { m.GamingBalance, m.FoodBalance }).FirstOrDefaultAsync(ct);
                 if (await ApplyOneMemberAsync(db, item, ct)) membersAdded++;
                 if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(ct);
+
+                // A balance changed elsewhere (Super Admin edit, top-up at another branch) just
+                // landed here: refresh this branch's screens and the member's gaming PC now.
+                var balanceAfter = await db.Members.AsNoTracking().Where(m => m.Id == item.Id)
+                    .Select(m => new { m.GamingBalance, m.FoodBalance }).FirstOrDefaultAsync(ct);
+                if (balanceBefore != null && balanceAfter != null && !balanceBefore.Equals(balanceAfter))
+                {
+                    try
+                    {
+                        await scope.ServiceProvider.GetRequiredService<IHubNotificationService>()
+                            .BroadcastMemberBalanceUpdateAsync(_branchId, item.Id);
+                    }
+                    catch { /* a missed refresh is not worth failing the sync over */ }
+                }
             }
             catch (Exception ex)
             {

@@ -64,3 +64,33 @@ public class StopSessionDto
 {
     public bool DeferPayment { get; set; } = false;
 }
+
+/// <summary>One package a running session could switch to, priced and checked by the server.</summary>
+public class PackageOptionDto
+{
+    public Guid PackageId { get; set; }
+    public string Name { get; set; } = null!;
+    public int Minutes { get; set; }
+    public decimal Price { get; set; }
+    public bool IsCurrent { get; set; }
+    public bool Allowed { get; set; }
+    /// <summary>Why not, in words the customer can read ("Already played 3 hr 10 min").</summary>
+    public string? Reason { get; set; }
+    /// <summary>Playing time left if switched now.</summary>
+    public int MinutesLeftAfter { get; set; }
+}
+
+public class PackageOptionsDto
+{
+    public Guid SessionId { get; set; }
+    public string? CurrentName { get; set; }
+    public decimal CurrentPrice { get; set; }
+    public int PlayedMinutes { get; set; }
+    public string? Unavailable { get; set; }
+    public List<PackageOptionDto> Options { get; set; } = new();
+}
+
+public class ChangePackageDto
+{
+    public Guid PackageId { get; set; }
+}

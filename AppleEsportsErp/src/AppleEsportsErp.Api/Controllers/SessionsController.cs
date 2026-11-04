@@ -211,6 +211,30 @@ public class SessionsController : ControllerBase
         return Ok(ApiResponse<SessionDto>.Ok(result));
     }
 
+    /// <summary>Packages this running session could switch to - price, time left, and why not.</summary>
+    [HttpGet("{id:guid}/package-options")]
+    public async Task<IActionResult> GetPackageOptions(Guid id)
+    {
+        var result = await _sessionService.GetPackageOptionsAsync(GetBranchId(), id);
+        return Ok(ApiResponse<PackageOptionsDto>.Ok(result));
+    }
+
+    /// <summary>
+    /// Change the running package (up or down) - from the operator's own panel, or when approving
+    /// the customer's request from their gaming PC. Done at the branch, where the session lives.
+    /// </summary>
+    [HttpPost("{id:guid}/change-package")]
+    public async Task<IActionResult> ChangePackage(Guid id, [FromBody] ChangePackageDto dto,
+        [FromServices] Microsoft.AspNetCore.SignalR.IHubContext<AppleEsportsErp.Api.Hubs.PcOverlayHub> overlayHub)
+    {
+        if (_remote.MustTravel)
+            return BadRequest(ApiResponse<object>.Fail("Change the package at the branch counter, where the session is running."));
+
+        var result = await _sessionService.ChangePackageAsync(GetBranchId(), await this.GetOperatorIdAsync(), id, dto.PackageId);
+        await overlayHub.Clients.Group($"pc:{result.PcId}").SendAsync("PackageChanged", new { sessionId = id });
+        return Ok(ApiResponse<SessionDto>.Ok(result));
+    }
+
     [HttpPost("{id}/extend")]
     public async Task<IActionResult> ExtendSession(Guid id, [FromBody] SessionExtendDto dto)
     {

@@ -1,3 +1,4 @@
+import useMemberBalanceUpdates, { withFreshBalance } from '../../hooks/useMemberBalanceUpdates';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertTriangle, Receipt, Wallet, CreditCard, Banknote, Gamepad2, Coffee, KeyRound, ShieldCheck, ShieldAlert, Eye, EyeOff, Search } from 'lucide-react';
@@ -86,6 +87,12 @@ export default function PaymentEngineModal({ bill, onClose, onPaymentSuccess }) 
       setSelectedMember(null);
     }
   }, [bill?.memberId]);
+
+  useMemberBalanceUpdates((u) => {
+    setMemberWallet(m => withFreshBalance(m, u));
+    setSelectedMember(m => withFreshBalance(m, u));
+    setSearchResults(list => list.map(m => withFreshBalance(m, u)));
+  });
 
   if (!bill) return null;
 

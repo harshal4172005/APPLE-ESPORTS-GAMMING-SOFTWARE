@@ -112,3 +112,22 @@ public class EditPaymentMethodDto
     [MinLength(1)]
     public string Reason { get; set; } = null!;
 }
+
+/// <summary>
+/// A PS5 customer's play, entered by the operator at the Cash Desk. Becomes an ordinary bill
+/// (no PC, no session) numbered PS5-..., paid like any other: cash, online, split or credit.
+/// </summary>
+public class CreatePs5BillDto
+{
+    [Range(1, 100000)]
+    public decimal Amount { get; set; }
+
+    [Required, MaxLength(100)]
+    public string CustomerName { get; set; } = null!;
+
+    [MaxLength(20)]
+    public string? CustomerPhone { get; set; }
+
+    [MaxLength(120)]
+    public string? Note { get; set; }
+}

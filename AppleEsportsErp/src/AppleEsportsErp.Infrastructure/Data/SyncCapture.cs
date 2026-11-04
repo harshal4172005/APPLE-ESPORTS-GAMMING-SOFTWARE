@@ -119,6 +119,13 @@ public static class SyncCapture
         // restock a branch that has just sold out.
         [typeof(InventoryItem)] = "inventory_item",
 
+        // Every movement of stock: a refill by the admin, a sale, a count correction. The item
+        // snapshot above says what is on the shelf NOW; this says how it got there, which is the
+        // only way Head Office can answer "I put 950 in and 900 sold - where did 50 go?".
+        // Head Office had almost none of this (4 price changes in total on 4 Nov 2026), because
+        // the log was written at the branch and never travelled. Insert-only, like AuditLog.
+        [typeof(InventoryLog)] = "inventory_log",
+
         // A shift's whole stock count, so Super Admin sees who counted what under each
         // register's note breakdown at Head Office too. Insert-only, like AuditLog.
         [typeof(StockCount)] = "stock_count",

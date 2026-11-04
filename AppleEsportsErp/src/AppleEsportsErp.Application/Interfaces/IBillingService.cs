@@ -9,6 +9,8 @@ public interface IBillingService
     Task<List<BillDto>> GetDeferredBillsAsync(Guid branchId);
     Task<BillDto> GetBillAsync(Guid branchId, Guid id);
     Task<BillDto> GetBillByNumberAsync(Guid branchId, string billNumber);
+    /// <summary>A PS5 entry from the Cash Desk, as a pending gaming bill to be paid like any other.</summary>
+    Task<BillDto> CreatePs5BillAsync(Guid branchId, Guid operatorId, Guid shiftId, string actorRole, CreatePs5BillDto dto);
     /// <summary>
     /// <paramref name="actorRole"/> is recorded on the audit entry. It used to be hardcoded to
     /// SuperAdmin regardless of who applied it, which made the audit trail unable to answer the

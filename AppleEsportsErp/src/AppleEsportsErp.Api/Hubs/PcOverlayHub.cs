@@ -298,29 +298,103 @@ public class PcOverlayHub : Hub
     public async Task<object> RequestExtension(ExtensionPayload payload)
     {
         _logger.LogInformation("Extension request from {PcId} for {Duration} mins", payload.PcId, payload.Duration);
-        
+
         var pc = await GetPcAsync(payload.PcId);
-        bool isOperatorOnline = pc != null && AppleEsportsErp.Application.Services.OperatorPresenceTracker.IsOperatorAvailable(pc.BranchId.ToString());
-        var payloadObj = new 
+        if (pc == null)
+            return new { success = false, error = "This PC is not registered." };
+
+        // Built from the running session, not just the PC: the operator's card needs to say
+        // whose time it is ("PC-07 — Rahul"), not a bare id, and what it will really cost.
+        var session = await _db.Sessions.AsNoTracking()
+            .Include(s => s.Member)
+            .Include(s => s.Bills)
+            .Include(s => s.Pc).ThenInclude(p => p!.PricingProfile).ThenInclude(pp => pp!.Packages)
+            .Where(s => s.PcId == pc.Id && s.State == SessionState.Active)
+            .OrderByDescending(s => s.StartTime)
+            .FirstOrDefaultAsync();
+
+        // No session = nothing to extend. Sending it on anyway produced an Approve button that
+        // posted to /sessions/null/extend.
+        if (session == null)
+            return new { success = false, error = "There is no running session on this PC to add time to." };
+
+        // The same function the charge uses, so the card cannot show a different price.
+        var (amount, package) = AppleEsportsErp.Application.Services.SessionPricingCalculator
+            .ExtensionPrice(session.Pc?.PricingProfile, payload.Duration);
+
+        var customerName = !string.IsNullOrWhiteSpace(session.CustomerName) ? session.CustomerName
+            : session.Member?.FullName ?? "Walk-in";
+
+        bool isOperatorOnline = AppleEsportsErp.Application.Services.OperatorPresenceTracker.IsOperatorAvailable(pc.BranchId.ToString());
+        var payloadObj = new
         {
-            PcId = payload.PcId,
-            BranchId = pc?.BranchId,
+            PcId = pc.Id,
+            PcNumber = pc.PcNumber,
+            PcName = pc.PcName,
+            BranchId = pc.BranchId,
             Duration = payload.Duration,
-            SessionId = payload.SessionId
+            SessionId = session.Id,
+            CustomerName = customerName,
+            MemberId = session.MemberId,
+            BillNumber = session.Bills.OrderBy(b => b.CreatedAt).Select(b => b.BillNumber).FirstOrDefault(),
+            PlanName = package?.Name,
+            ExpectedAmount = Math.Round(amount, 2),
         };
-        
+
         // Notify operators in this branch, OR admins globally if operator is offline
-        if (pc != null && isOperatorOnline)
-        {
+        if (isOperatorOnline)
             await _sessionHub.Clients.Group($"branch:{pc.BranchId}").SendAsync("ExtensionRequested", payloadObj);
-        }
         else
-        {
             await _sessionHub.Clients.Group("admin:all").SendAsync("ExtensionRequested", payloadObj);
-        }
-        
-        // Simulating approval for the sake of the overlay testing. 
-        // In real life, we would await an operator response.
+
+        return new { success = true, status = "pending_operator_approval" };
+    }
+
+    /// <summary>
+    /// The customer asks to move to another package from their gaming PC. Checked here with the
+    /// same rules the change itself uses, and sent to the operator as a card to approve - the
+    /// customer can never change their own package or price.
+    /// </summary>
+    public async Task<object> RequestPackageChange(PackageChangePayload payload,
+        AppleEsportsErp.Application.Interfaces.ISessionService sessionService)
+    {
+        var pc = await GetPcAsync(payload.PcId);
+        if (pc == null) return new { success = false, error = "This PC is not registered." };
+
+        var session = await _db.Sessions.AsNoTracking()
+            .Include(s => s.Member).Include(s => s.Bills)
+            .Where(s => s.PcId == pc.Id && s.State == SessionState.Active)
+            .OrderByDescending(s => s.StartTime)
+            .FirstOrDefaultAsync();
+        if (session == null) return new { success = false, error = "There is no running session on this PC." };
+
+        var options = await sessionService.GetPackageOptionsAsync(session.BranchId, session.Id);
+        if (options.Unavailable != null) return new { success = false, error = options.Unavailable };
+        var option = options.Options.FirstOrDefault(o => o.PackageId == payload.PackageId);
+        if (option == null) return new { success = false, error = "That package is not available on this PC." };
+        if (!option.Allowed) return new { success = false, error = option.Reason };
+
+        var card = new
+        {
+            PcId = pc.Id,
+            PcNumber = pc.PcNumber,
+            BranchId = pc.BranchId,
+            SessionId = session.Id,
+            CustomerName = !string.IsNullOrWhiteSpace(session.CustomerName) ? session.CustomerName : session.Member?.FullName ?? "Walk-in",
+            BillNumber = session.Bills.OrderBy(b => b.CreatedAt).Select(b => b.BillNumber).FirstOrDefault(),
+            PackageId = option.PackageId,
+            FromName = options.CurrentName,
+            FromPrice = options.CurrentPrice,
+            ToName = option.Name,
+            ToPrice = option.Price,
+            PlayedMinutes = options.PlayedMinutes,
+            MinutesLeftAfter = option.MinutesLeftAfter,
+        };
+
+        bool isOperatorOnline = AppleEsportsErp.Application.Services.OperatorPresenceTracker.IsOperatorAvailable(pc.BranchId.ToString());
+        await _sessionHub.Clients.Group(isOperatorOnline ? $"branch:{pc.BranchId}" : "admin:all")
+            .SendAsync("PackageChangeRequested", card);
+
         return new { success = true, status = "pending_operator_approval" };
     }
 
@@ -492,4 +566,10 @@ public class PendingWalkinData
     [JsonPropertyName("duration")] public int Duration { get; set; }
     [JsonPropertyName("packageName")] public string PackageName { get; set; } = string.Empty;
     [JsonPropertyName("timestamp")] public string Timestamp { get; set; } = string.Empty;
+}
+
+public class PackageChangePayload
+{
+    [JsonPropertyName("pcId")] public string PcId { get; set; } = string.Empty;
+    [JsonPropertyName("packageId")] public Guid PackageId { get; set; }
 }

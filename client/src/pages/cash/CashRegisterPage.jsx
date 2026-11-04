@@ -175,6 +175,25 @@ export default function CashRegisterPage() {
     [history, historyOperator]
   );
 
+  // Range + operator totals. A register still open has no final count, so it is left out.
+  const differenceSummary = useMemo(() => {
+    const rows = filteredHistory.filter(r => r.closedAt);
+    const byOperator = {};
+    let short = 0, extra = 0;
+    for (const r of rows) {
+      const o = (byOperator[r.operatorName] ||= { name: r.operatorName, count: 0, short: 0, extra: 0 });
+      o.count += 1;
+      if (r.difference < 0) { o.short += r.difference; short += r.difference; }
+      else { o.extra += r.difference; extra += r.difference; }
+    }
+    return {
+      count: rows.length,
+      short, extra, net: short + extra,
+      stillOpen: filteredHistory.length - rows.length,
+      operators: Object.values(byOperator).sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }, [filteredHistory]);
+
   const resetHistoryToToday = () => {
     setHistoryFrom(todayIso());
     setHistoryTo(todayIso());
@@ -188,7 +207,7 @@ export default function CashRegisterPage() {
     const subtitle = `${activeBranch?.name || 'Branch'}  •  ${rangeLabel}${operatorLabel}`;
     const { doc } = createReport({ title: 'Cash Register History', subtitle });
 
-    addTable(doc, 90, {
+    let y = addTable(doc, 90, {
       title: 'Cash Register History', subtitle,
       head: ['Opened', 'Closed', 'Operator', 'Expected', 'Counted', 'Difference', 'Status'],
       body: filteredHistory.map(r => [
@@ -200,6 +219,23 @@ export default function CashRegisterPage() {
         `Rs ${r.difference.toFixed(2)}`,
         r.isVerified ? 'Verified' : 'Unverified',
       ]),
+    });
+
+    const d = differenceSummary;
+    y = addTable(doc, y, {
+      heading: `Total difference${d.stillOpen ? `  (${d.stillOpen} still open - not counted)` : ''}`,
+      title: 'Cash Register History', subtitle,
+      head: ['Short', 'Extra', 'Net'],
+      body: [[pdfRs(d.short), pdfRs(d.extra), pdfRs(d.net)]],
+    });
+    addTable(doc, y, {
+      heading: 'Difference by operator',
+      title: 'Cash Register History', subtitle,
+      head: ['Operator', 'Registers', 'Short', 'Extra', 'Net'],
+      body: [
+        ...d.operators.map(o => [o.name, o.count, pdfRs(o.short), pdfRs(o.extra), pdfRs(o.short + o.extra)]),
+        ['TOTAL', d.count, pdfRs(d.short), pdfRs(d.extra), pdfRs(d.net)],
+      ],
     });
 
     save(doc, `cash-register-history-${historyFrom}${historyFrom !== historyTo ? `_to_${historyTo}` : ''}.pdf`);
@@ -408,6 +444,9 @@ export default function CashRegisterPage() {
   };
 
   const handleBackButton = async () => {
+    // On a step that has not locked the register yet, Back leaves the shift-end flow. It used to
+    // do that from every step, including straight after the stock count - and coming back landed
+    // on the money step with no way to see or redo the count (owner, 4 Nov 2026).
     if (register?.status !== 'Verifying') {
       navigate(-1);
       return;
@@ -574,6 +613,7 @@ export default function CashRegisterPage() {
               })}
             </tbody>
           </table>
+          <DifferenceSummary summary={differenceSummary} />
         </div>
       )}
     </div>
@@ -713,11 +753,24 @@ export default function CashRegisterPage() {
         </div>
       )}
 
+      {/* Always the same order, always visible: the owner's complaint was that the stock question
+          landed in a different place on different days, with no way to tell where you were. */}
+      <ShiftEndSteps
+        current={
+          register.status === 'Verified' ? 4
+            : register.status === 'Verifying' ? 3
+            : missingEnabled && !missingStatus?.closingCountDone ? 1
+            : missingEnabled && missingStatus?.pending?.length > 0 ? 2
+            : 3
+        }
+        withStock={missingEnabled}
+      />
+
       {/* Missing stock charged at this branch: count first, then pay, then lock (below). */}
       {register.status === 'Open' && missingEnabled && !missingStatus.closingCountDone && (
         inventory === null
           ? <div className="flex-1 flex items-center justify-center text-text-3 text-sm">{stockError || 'Loading the stock list...'}</div>
-          : <MissingStockCount inventory={inventory} registerId={register.id} onDone={fetchMissingStatus} />
+          : <MissingStockCount registerId={register.id} onDone={fetchMissingStatus} />
       )}
       {register.status === 'Open' && missingEnabled && missingStatus.closingCountDone && missingStatus.pending.length > 0 && (
         <MissingStockPay bills={missingStatus.pending} onPaid={fetchMissingStatus} />
@@ -968,5 +1021,95 @@ export default function CashRegisterPage() {
     </div>
     {historySection}
     </>
+  );
+}
+
+const pdfRs = (n) => `Rs ${n > 0 ? '+' : ''}${n.toFixed(2)}`;
+const money = (n) => `₹${n > 0 ? '+' : ''}${n.toFixed(2)}`;
+const tone = (n) => (n === 0 ? 'text-text-2' : n < 0 ? 'text-neon-red' : 'text-neon-orange');
+
+function DifferenceSummary({ summary: d }) {
+  return (
+    <div className="mt-4 grid gap-3 md:grid-cols-2 font-mono text-xs">
+      <div className="border border-border rounded-lg p-3 bg-bg-3/30">
+        <div className="text-[10px] text-text-3 font-bold uppercase tracking-wider font-sans mb-2">Total difference</div>
+        <div className="flex flex-wrap gap-x-6 gap-y-1">
+          <span className="text-text-3">Short <b className={tone(d.short)}>{money(d.short)}</b></span>
+          <span className="text-text-3">Extra <b className={tone(d.extra)}>{money(d.extra)}</b></span>
+          <span className="text-text-3">Net <b className={tone(d.net)}>{money(d.net)}</b></span>
+        </div>
+        {d.stillOpen > 0 && (
+          <div className="text-text-3 italic mt-2 font-sans">
+            {d.stillOpen} register{d.stillOpen > 1 ? 's' : ''} still open — not counted yet
+          </div>
+        )}
+      </div>
+      <div className="border border-border rounded-lg p-3 bg-bg-3/30">
+        <div className="text-[10px] text-text-3 font-bold uppercase tracking-wider font-sans mb-2">Difference by operator</div>
+        <table className="w-full">
+          <thead>
+            <tr className="text-text-3 text-[10px] uppercase">
+              <th className="text-left font-bold pb-1">Operator</th>
+              <th className="text-right font-bold pb-1">Registers</th>
+              <th className="text-right font-bold pb-1">Short</th>
+              <th className="text-right font-bold pb-1">Extra</th>
+              <th className="text-right font-bold pb-1">Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            {d.operators.map(o => (
+              <tr key={o.name}>
+                <td className="text-neon-blue font-bold font-sans py-0.5">{o.name}</td>
+                <td className="text-right text-text-2">{o.count}</td>
+                <td className={`text-right ${tone(o.short)}`}>{money(o.short)}</td>
+                <td className={`text-right ${tone(o.extra)}`}>{money(o.extra)}</td>
+                <td className={`text-right font-bold ${tone(o.short + o.extra)}`}>{money(o.short + o.extra)}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-border">
+              <td className="font-bold font-sans pt-1">TOTAL</td>
+              <td className="text-right text-text-2 pt-1">{d.count}</td>
+              <td className={`text-right pt-1 ${tone(d.short)}`}>{money(d.short)}</td>
+              <td className={`text-right pt-1 ${tone(d.extra)}`}>{money(d.extra)}</td>
+              <td className={`text-right font-bold pt-1 ${tone(d.net)}`}>{money(d.net)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Where the operator is in the shift-end flow, and what is left. Shown on every step so the
+ * order never looks different from one day to the next.
+ */
+function ShiftEndSteps({ current, withStock }) {
+  const steps = [
+    ...(withStock ? [{ n: 1, label: 'Count stock' }, { n: 2, label: 'Pay missing' }] : []),
+    { n: 3, label: 'Lock & count money' },
+    { n: 4, label: 'Close shift' },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-4">
+      {steps.map((s, idx) => {
+        const done = current > s.n;
+        const now = current === s.n;
+        return (
+          <Fragment key={s.n}>
+            {idx > 0 && <span className="text-text-3 text-xs">›</span>}
+            <span
+              className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider border ${
+                now ? 'bg-accent/15 border-accent text-accent'
+                  : done ? 'border-neon-green/40 text-neon-green'
+                  : 'border-border text-text-3'
+              }`}
+            >
+              {done ? '✓ ' : ''}{s.label}
+            </span>
+          </Fragment>
+        );
+      })}
+    </div>
   );
 }

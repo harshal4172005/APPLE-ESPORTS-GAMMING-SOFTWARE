@@ -23,6 +23,9 @@ public class StockCount
 
     public DateTimeOffset CountedAt { get; set; }
 
+    /// <summary>When the operator opened the count screen - what the numbers were measured against.</summary>
+    public DateTimeOffset? OpenedAt { get; set; }
+
     /// <summary>The bill this count raised for missing items, if any (StockShortageBilling).</summary>
     public Guid? ShortageBillId { get; set; }
 

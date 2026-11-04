@@ -44,6 +44,32 @@ export default function MemberTimeSelectionScreen() {
     fetchPlans();
   }, [navigate, pcId]);
 
+  // Logged in but not playing yet: the balance shown came from login. Re-read it every 15 s so a
+  // top-up or admin edit at the counter shows here without logging out and back in.
+  useEffect(() => {
+    const token = localStorage.getItem('memberToken');
+    if (!token) return;
+    const refresh = async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        // Plain fetch, not `api`: its 401 handling sends the page to the staff login, and an
+        // expired member token on a background refresh must not take the gaming PC screen with it.
+        const res = await fetch('/api/public/members/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const fresh = (await res.json())?.data;
+        if (!fresh) return;
+        setProfile(p => {
+          const next = { ...(p || {}), gamingBalance: fresh.gamingBalance, foodBalance: fresh.foodBalance };
+          localStorage.setItem('memberProfile', JSON.stringify(next));
+          return next;
+        });
+      } catch { /* keep what is shown; the start itself is checked by the server */ }
+    };
+    refresh();
+    const timer = setInterval(refresh, 15000);
+    return () => clearInterval(timer);
+  }, []);
+
   const handleStartSession = async () => {
     if (!profile || !selectedPlan) return;
     

@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Monitor, User, Clock, Wrench, AlertTriangle, Square, RefreshCw, Receipt, Coffee, Gift, Banknote, X, Power, Keyboard, Mouse } from 'lucide-react';
+import { Monitor, User, Clock, Wrench, AlertTriangle, Square, RefreshCw, Receipt, Coffee, Gift, Banknote, X, Power, Keyboard, Mouse, Repeat } from 'lucide-react';
 import api from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../ui/Toast';
 import StartSessionForm from './StartSessionForm';
 import ExtendSessionModal from './ExtendSessionModal';
+import ChangePackageModal from './ChangePackageModal';
 import SessionDiscountModal from './SessionDiscountModal';
 import { formatMoney } from '../../utils/money';
 import { computeRoundedBreakdown } from '../../utils/billRounding';
@@ -99,6 +100,7 @@ export default function PcDetailPanel({
 
   const [actionLoading, setActionLoading] = useState(null);
   const [showExtendModal, setShowExtendModal] = useState(false);
+  const [showPackageModal, setShowPackageModal] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
 
   const bufferMinutes = pc?.bufferMinutes ?? 10;
@@ -357,6 +359,14 @@ export default function PcDetailPanel({
                   onClick={() => setShowExtendModal(true)}
                 />
               )}
+              {pc.sessionEndTime && (
+                <ActionBtn
+                  color="blue"
+                  icon={<Repeat className="w-3 h-3" />}
+                  label="Change Package"
+                  onClick={() => setShowPackageModal(true)}
+                />
+              )}
             </div>
 
             <div className={`grid ${(user?.role === 'super_admin' || (user?.role === 'admin' && user?.dashboardPermissions?.discount === true)) ? 'grid-cols-2' : 'grid-cols-1'} gap-1.5`}>
@@ -380,6 +390,13 @@ export default function PcDetailPanel({
               ) : null}
             </div>
 
+            {showPackageModal && (
+              <ChangePackageModal
+                pc={pc}
+                onClose={() => setShowPackageModal(false)}
+                onDone={() => onRefresh?.()}
+              />
+            )}
             {showExtendModal && (
               <ExtendSessionModal
                 pc={pc}

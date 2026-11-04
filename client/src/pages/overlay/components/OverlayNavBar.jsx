@@ -17,7 +17,7 @@ export default function OverlayNavBar() {
   const navItems = [
     { path: '', label: 'Home', icon: <Home className="w-5 h-5" />, name: 'home' },
     { path: 'food', label: 'Food', icon: <Coffee className="w-5 h-5" />, name: 'food' },
-    ...(isPayAsYouGo ? [] : [{ path: 'extend', label: 'Extend', icon: <Clock className="w-5 h-5" />, name: 'extend' }]),
+    ...(isPayAsYouGo ? [] : [{ path: 'extend', label: 'Time', icon: <Clock className="w-5 h-5" />, name: 'extend' }]),
     { path: 'call', label: 'Call', icon: <PhoneCall className="w-5 h-5" />, name: 'call' },
     { path: 'bill', label: 'Bill', icon: <Receipt className="w-5 h-5" />, name: 'bill' },
   ];
