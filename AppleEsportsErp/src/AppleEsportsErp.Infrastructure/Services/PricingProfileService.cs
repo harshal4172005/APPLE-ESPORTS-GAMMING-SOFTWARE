@@ -46,7 +46,11 @@ public class PricingProfileService : IPricingProfileService
             .OrderBy(pkg => pkg.SortOrder)
             .ThenBy(pkg => pkg.DurationMinutes)
             .Select(MapPackageToDto)
-            .ToList()
+            .ToList(),
+        ShortSessionSlabs = p.ShortSessionSlabs?.Select(s => new ShortSessionSlabDto
+        {
+            FromMinutes = s.FromMinutes, ToMinutes = s.ToMinutes, Amount = s.Amount
+        }).OrderBy(s => s.FromMinutes).ToList()
     };
 
     private static PricingPackageDto MapPackageToDto(PricingPackage pkg) => new()
@@ -63,6 +67,14 @@ public class PricingProfileService : IPricingProfileService
 
     /// <summary>"Package price from" has to sit inside the package: 4 hr from 3 hr 30 is fine,
     /// from 0 or from 5 hr is a typo that would quietly reprice every session.</summary>
+    private static List<ShortSessionSlab>? MapSlabsFromDto(List<ShortSessionSlabDto>? slabs)
+    {
+        if (slabs == null || slabs.Count == 0) return null;
+        return slabs.OrderBy(s => s.FromMinutes)
+            .Select(s => new ShortSessionSlab { FromMinutes = s.FromMinutes, ToMinutes = s.ToMinutes, Amount = s.Amount })
+            .ToList();
+    }
+
     private static int? CheckFromMin(int? fromMin, int durationMinutes)
     {
         if (fromMin is { } m && (m <= 0 || m > durationMinutes))
@@ -82,6 +94,7 @@ public class PricingProfileService : IPricingProfileService
             IsActive = dto.IsActive,
             RefreshRate = dto.RefreshRate,
             SystemSpecs = dto.SystemSpecs,
+            ShortSessionSlabs = MapSlabsFromDto(dto.ShortSessionSlabs),
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
@@ -104,6 +117,7 @@ public class PricingProfileService : IPricingProfileService
         profile.IsActive = dto.IsActive;
         profile.RefreshRate = dto.RefreshRate;
         profile.SystemSpecs = dto.SystemSpecs;
+        profile.ShortSessionSlabs = MapSlabsFromDto(dto.ShortSessionSlabs);
         profile.UpdatedAt = DateTimeOffset.UtcNow;
 
         await _db.SaveChangesAsync();

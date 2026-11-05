@@ -104,8 +104,11 @@ export default function PcDetailPanel({
   const [showDiscountModal, setShowDiscountModal] = useState(false);
 
   const bufferMinutes = pc?.bufferMinutes ?? 10;
+  const slabs = pc?.shortSessionSlabs || [];
+  const slabMatch = slabs.find(s => elapsed.totalMin > s.fromMinutes && elapsed.totalMin <= s.toMinutes);
   const rawGamingCharge = elapsed.totalMin <= bufferMinutes
     ? 0
+    : slabMatch ? slabMatch.amount
     : Number((Math.max(elapsed.totalMin / 60, 1 / 60) * (pc?.ratePerHour || 0)).toFixed(2));
   const { displayGaming: gamingCharge, roundedTotal: liveCharge } = computeRoundedBreakdown(
     rawGamingCharge, pc?.foodAmount || 0

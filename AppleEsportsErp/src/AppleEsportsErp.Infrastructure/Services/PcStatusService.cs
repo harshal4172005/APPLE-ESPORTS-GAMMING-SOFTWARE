@@ -90,6 +90,7 @@ public class PcStatusService : IPcStatusService
                 MonitorHz = pc.MonitorHz,
                 RatePerHour = calculatedRate,
                 BufferMinutes = bufferMinutes,
+                ShortSessionSlabs = pc.PricingProfile?.ShortSessionSlabs?.Select(s => new AppleEsportsErp.Application.DTOs.Settings.ShortSessionSlabDto { FromMinutes = s.FromMinutes, ToMinutes = s.ToMinutes, Amount = s.Amount }).OrderBy(s => s.FromMinutes).ToList(),
                 IsAgentOnline = pc.IsAgentOnline,
                 ConnectionMode = pc.ConnectionMode,
                 AgentVersion = pc.AgentVersion,
@@ -143,7 +144,7 @@ public class PcStatusService : IPcStatusService
                     decimal elapsedMinutes = SessionTimeCalculator.ElapsedMinutes(
                         session.StartTime, session.PausedSeconds, now);
                     decimal liveGamingAmount = SessionPricingCalculator.CalculateLiveGamingAmount(
-                        session.PackagePrice, session.PackageMinutes ?? session.PlannedDurationMin, calculatedRate, bufferMinutes, elapsedMinutes, session.PackageFromMin);
+                        session.PackagePrice, session.PackageMinutes ?? session.PlannedDurationMin, calculatedRate, bufferMinutes, elapsedMinutes, session.PackageFromMin, pc.PricingProfile?.ShortSessionSlabs);
                     dto.TotalAmount = liveGamingAmount + session.FoodAmount;
                 }
                 else
@@ -182,7 +183,7 @@ public class PcStatusService : IPcStatusService
                     // Head Office has no local Session row to read this from directly.
                     dto.TotalAmount = SessionPricingCalculator.CalculateLiveGamingAmount(
                         pc.CurrentSessionPackagePrice, pc.CurrentSessionPlannedDurationMin,
-                        calculatedRate, bufferMinutes, elapsedMinutes, pc.CurrentSessionPackageFromMin);
+                        calculatedRate, bufferMinutes, elapsedMinutes, pc.CurrentSessionPackageFromMin, pc.PricingProfile?.ShortSessionSlabs);
                 }
             }
             else if (recentCompletedSessions.TryGetValue(pc.Id, out var lastSession) && lastSession != null)

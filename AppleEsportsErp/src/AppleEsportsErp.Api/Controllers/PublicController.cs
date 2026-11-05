@@ -180,7 +180,7 @@ public class PublicController : ControllerBase
         // amount; activePackages below is only ever a list of what's available, never what this
         // particular session is actually running under.
         decimal liveGamingCharges = AppleEsportsErp.Application.Services.SessionPricingCalculator.CalculateLiveGamingAmount(
-            session.PackagePrice, session.PackageMinutes ?? session.PlannedDurationMin, ratePerHour, bufferMinutes, (decimal)elapsedMinutes, session.PackageFromMin);
+            session.PackagePrice, session.PackageMinutes ?? session.PlannedDurationMin, ratePerHour, bufferMinutes, (decimal)elapsedMinutes, session.PackageFromMin, pc.PricingProfile?.ShortSessionSlabs);
 
         decimal? walletBalance = null;
         decimal? gamingBalance = null;

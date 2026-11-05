@@ -4,7 +4,7 @@ import { Lock, AlertTriangle, Calculator, LogOut, ArrowLeft, Calendar, Download,
 import { useAuth } from '../../contexts/AuthContext';
 import { useBranch } from '../../contexts/BranchContext';
 import api from '../../config/api';
-import { getCashReconciliationReport } from '../../api/reports.api';
+import { getCashReconciliationReport, acknowledgeCashRegister } from '../../api/reports.api';
 import PageHeader from '../../components/layout/PageHeader';
 import DenominationCounter from '../../components/cash/DenominationCounter';
 import { MissingStockCount, MissingStockPay } from '../../components/cash/MissingStockSteps';
@@ -193,6 +193,13 @@ export default function CashRegisterPage() {
       operators: Object.values(byOperator).sort((a, b) => a.name.localeCompare(b.name)),
     };
   }, [filteredHistory]);
+
+  const handleAcknowledge = async (registerId, current) => {
+    try {
+      await acknowledgeCashRegister(registerId, !current);
+      setHistory(h => h?.map(r => r.cashRegisterId === registerId ? { ...r, superAdminAcknowledged: !current } : r));
+    } catch { /* ignore */ }
+  };
 
   const resetHistoryToToday = () => {
     setHistoryFrom(todayIso());
@@ -550,6 +557,7 @@ export default function CashRegisterPage() {
                 <th className="py-2 px-3 text-right">Counted</th>
                 <th className="py-2 px-3 text-right">Difference</th>
                 <th className="py-2 px-3 text-center">Status</th>
+                {isTrueSuperAdmin && <th className="py-2 px-3 text-center">Received</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40 font-mono">
@@ -584,10 +592,21 @@ export default function CashRegisterPage() {
                           {r.isVerified ? 'Verified' : 'Unverified'}
                         </span>
                       </td>
+                      {isTrueSuperAdmin && (
+                        <td className="py-2 px-3 text-center" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={!!r.superAdminAcknowledged}
+                            onChange={() => handleAcknowledge(r.cashRegisterId, r.superAdminAcknowledged)}
+                            className="rounded border-text-3 text-accent focus:ring-accent bg-transparent cursor-pointer"
+                            title={r.superAdminAcknowledged ? 'Cash received — click to undo' : 'Tick to confirm cash received'}
+                          />
+                        </td>
+                      )}
                     </tr>
                     {isExpanded && (
                       <tr>
-                        <td colSpan={8} className="py-2 px-3 bg-bg-3/30">
+                        <td colSpan={isTrueSuperAdmin ? 9 : 8} className="py-2 px-3 bg-bg-3/30">
                           <div className="text-[10px] text-text-3 font-bold uppercase tracking-wider mb-1 font-sans">Cash</div>
                           {denominations.length === 0 ? (
                             <span className="text-text-3 italic">

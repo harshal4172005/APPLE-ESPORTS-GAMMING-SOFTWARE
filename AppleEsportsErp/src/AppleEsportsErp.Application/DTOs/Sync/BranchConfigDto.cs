@@ -215,6 +215,7 @@ public class BranchPricingProfileConfigDto
     public string? SystemSpecs { get; set; }
 
     public List<BranchPricingPackageConfigDto> Packages { get; set; } = new();
+    public List<AppleEsportsErp.Application.DTOs.Settings.ShortSessionSlabDto>? ShortSessionSlabs { get; set; }
 }
 
 /// <summary>One fixed-duration/fixed-price package on a pricing profile - see PricingPackage.</summary>

@@ -41,6 +41,7 @@ public class PcStatusDto
     public string? CustomerType { get; set; }  // "Walk-in" | "Member"
     public decimal RatePerHour { get; set; }   // For live charge calculation on frontend
     public int BufferMinutes { get; set; }     // Free grace period before billing starts (from PricingProfile)
+    public List<AppleEsportsErp.Application.DTOs.Settings.ShortSessionSlabDto>? ShortSessionSlabs { get; set; }
     public decimal TotalAmount { get; set; }   // Actual total accumulated charge for the session (gaming + food), live for Active sessions
     public int PausedSeconds { get; set; }    // Downtime credited back — the client subtracts this from wall-clock elapsed
     public decimal FoodAmount { get; set; }    // Food/add-on portion of TotalAmount, so the frontend can tick the gaming portion between polls without drifting

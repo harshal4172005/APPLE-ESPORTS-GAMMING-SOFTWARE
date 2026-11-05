@@ -577,6 +577,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasDefaultValueSql("uuid_generate_v4()");
 
+                    b.Property<DateTimeOffset?>("AcknowledgedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("BranchId")
                         .HasColumnType("uuid");
 
@@ -638,6 +641,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasDefaultValue("open");
+
+                    b.Property<bool>("SuperAdminAcknowledged")
+                        .HasColumnType("boolean");
 
                     b.Property<decimal>("TotalCashSales")
                         .ValueGeneratedOnAdd()
@@ -2358,6 +2364,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
 
                     b.Property<string>("RefreshRate")
                         .HasColumnType("text");
+
+                    b.Property<string>("ShortSessionSlabs")
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("SystemSpecs")
                         .HasColumnType("text");

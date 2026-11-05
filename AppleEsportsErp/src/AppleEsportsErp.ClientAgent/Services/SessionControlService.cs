@@ -33,7 +33,7 @@ public class SessionControlService
             _lockScreen.UnlockPc(duration, customerName, new Views.SessionPricingInfo(
                 command?.PackagePrice, command?.PlannedDurationMin, command?.PackageName,
                 command?.RatePerHour ?? 0m, command?.BufferMinutes ?? 0, command?.SessionStartUtc,
-                command?.PackageFromMin));
+                command?.PackageFromMin, command?.ShortSessionSlabs));
         }
         catch
         {
@@ -90,4 +90,12 @@ internal class UnlockCommand
     /// <summary>Lets LockScreen tick the live amount itself between pushes, the same way it
     /// already ticks the countdown, instead of showing a number frozen at send time.</summary>
     public DateTimeOffset? SessionStartUtc { get; set; }
+    public List<SlabEntry>? ShortSessionSlabs { get; set; }
+}
+
+public class SlabEntry
+{
+    public int FromMinutes { get; set; }
+    public int ToMinutes { get; set; }
+    public decimal Amount { get; set; }
 }

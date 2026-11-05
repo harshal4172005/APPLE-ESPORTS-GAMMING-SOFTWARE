@@ -22,6 +22,8 @@ public class PricingProfile
     /// <summary>Custom fixed-duration packages (e.g. "30 min - Rs 30") for this profile. Empty
     /// means no custom packages have been set up here - the customer-facing plan list falls
     /// back to the existing auto 1/2/3-hour multiples of BaseHourlyRate, exactly as before.</summary>
+    public List<ShortSessionSlab>? ShortSessionSlabs { get; set; }
+
     public ICollection<PricingPackage> Packages { get; set; } = new List<PricingPackage>();
 }
 
@@ -50,4 +52,14 @@ public class PricingPackage
     public DateTimeOffset UpdatedAt { get; set; }
 
     public PricingProfile PricingProfile { get; set; } = null!;
+}
+
+/// <summary>Fixed-price slabs for sessions shorter than the hourly billing threshold.
+/// Stored as JSON on the profile (not a separate table) because a profile rarely has
+/// more than half a dozen and they always travel together. Empty/null = pure hourly.</summary>
+public class ShortSessionSlab
+{
+    public int FromMinutes { get; set; }
+    public int ToMinutes { get; set; }
+    public decimal Amount { get; set; }
 }

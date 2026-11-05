@@ -272,6 +272,16 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<FoodOrder>().UseXminAsConcurrencyToken();
         modelBuilder.Entity<InventoryItem>().UseXminAsConcurrencyToken();
 
+        modelBuilder.Entity<PricingProfile>().Property(p => p.ShortSessionSlabs)
+            .HasColumnType("jsonb")
+            .HasConversion(
+                v => v == null ? null : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                v => v == null ? null : System.Text.Json.JsonSerializer.Deserialize<List<ShortSessionSlab>>(v, (System.Text.Json.JsonSerializerOptions?)null))
+            .Metadata.SetValueComparer(new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<List<ShortSessionSlab>>(
+                (a, b) => System.Text.Json.JsonSerializer.Serialize(a, (System.Text.Json.JsonSerializerOptions?)null) == System.Text.Json.JsonSerializer.Serialize(b, (System.Text.Json.JsonSerializerOptions?)null),
+                v => v == null ? 0 : System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null).GetHashCode(),
+                v => v == null ? null! : System.Text.Json.JsonSerializer.Deserialize<List<ShortSessionSlab>>(System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null), (System.Text.Json.JsonSerializerOptions?)null)!));
+
         // Apply all IEntityTypeConfiguration<T> from this assembly
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
     }

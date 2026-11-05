@@ -24,7 +24,8 @@ public interface IHubNotificationService
         Guid pcId, int durationMinutes, string? customerName,
         decimal? packagePrice = null, int? plannedDurationMin = null, string? packageName = null,
         decimal ratePerHour = 0m, int bufferMinutes = 0, DateTimeOffset? sessionStartUtc = null,
-        int? packageFromMin = null);
+        int? packageFromMin = null,
+        List<Domain.Entities.ShortSessionSlab>? shortSessionSlabs = null);
     Task SendLockCommandToAgentAsync(Guid pcId);
 
     /// <summary>Warns the member at this PC that their balance is nearly used up.</summary>

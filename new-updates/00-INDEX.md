@@ -34,6 +34,8 @@ Work starts from count 1.
 | 19 | [Power cut: pause timer and money](19-power-cut-pause-timer-and-money.md) | Branch + Gaming PC + HQ | Built — waits for next release |
 | 20 | [Restart should not auto-bill](20-restart-should-not-auto-bill.md) | Branch + Gaming PC + HQ | Built (same fix as 19) — waits for next release |
 | 21 | [EOD: Gaming Revenue box](21-eod-gaming-revenue-box.md) | EOD (branch + HQ) | Built — waits for next release |
+| 22 | [Short session slab pricing](22-short-session-slab-pricing.md) | Branch + HQ + Gaming PC | Built — waits for next release |
+| 23 | [Cash register super admin acknowledge](23-cash-register-super-admin-acknowledge.md) | Branch + HQ | Built — waits for next release |
 
 Status values: Noted → Explained → Develop approved → Built → Tested → Shipped (version)
 

@@ -67,6 +67,9 @@ public class CashRegister
     public DateTimeOffset? VerifiedAt { get; set; }
     public DateTimeOffset? ClosedAt { get; set; }
 
+    public bool SuperAdminAcknowledged { get; set; }
+    public DateTimeOffset? AcknowledgedAt { get; set; }
+
     // Navigation
     public Shift Shift { get; set; } = null!;
     public Branch Branch { get; set; } = null!;

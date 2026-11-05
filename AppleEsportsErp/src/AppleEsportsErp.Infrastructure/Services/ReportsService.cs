@@ -71,7 +71,8 @@ public class ReportsService : IReportsService
                 Difference = r.CashDifference ?? 0,
                 MismatchReason = r.MismatchReason ?? string.Empty,
                 IsVerified = (r.CashDifference == 0),
-                
+                SuperAdminAcknowledged = r.SuperAdminAcknowledged,
+
                 // Denominations
                 Notes2000 = denom?.Notes2000 ?? 0,
                 Notes500 = denom?.Notes500 ?? 0,

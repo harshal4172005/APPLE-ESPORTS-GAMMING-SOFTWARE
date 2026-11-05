@@ -17,6 +17,7 @@ public class ReconciliationReportDto
     public decimal Difference { get; set; }
     public string MismatchReason { get; set; } = string.Empty;
     public bool IsVerified { get; set; }
+    public bool SuperAdminAcknowledged { get; set; }
 
     // Physical Note Breakdown
     public int Notes2000 { get; set; }

@@ -13,6 +13,7 @@ export default function PricingProfilesTab() {
   const [loading, setLoading] = useState(false);
   const [drawer, setDrawer] = useState({ isOpen: false, data: null });
   const [packageForm, setPackageForm] = useState({ id: null, name: '', durationMinutes: '', price: '', fromMinutes: '' });
+  const [slabRows, setSlabRows] = useState([]);
 
   // Initially select first branch if none selected
   useEffect(() => {
@@ -42,6 +43,7 @@ export default function PricingProfilesTab() {
   const handleSave = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
+    const validSlabs = slabRows.filter(s => s.fromMinutes !== '' && s.toMinutes !== '' && s.amount !== '');
     const payload = {
       name: formData.get('name'),
       baseHourlyRate: Number(formData.get('baseHourlyRate')),
@@ -49,7 +51,8 @@ export default function PricingProfilesTab() {
       isActive: formData.get('isActive') === 'on',
       branchId: selectedBranchId,
       refreshRate: formData.get('refreshRate') || null,
-      systemSpecs: formData.get('systemSpecs') || null
+      systemSpecs: formData.get('systemSpecs') || null,
+      shortSessionSlabs: validSlabs.length > 0 ? validSlabs.map(s => ({ fromMinutes: Number(s.fromMinutes), toMinutes: Number(s.toMinutes), amount: Number(s.amount) })) : null
     };
 
     try {
@@ -168,6 +171,37 @@ export default function PricingProfilesTab() {
               <label>Free Buffer / Grace Period (minutes) *</label>
               <input type="number" step="1" min="0" name="bufferMinutes" required defaultValue={drawer.data?.bufferMinutes ?? 10} className="form-control" placeholder="e.g. 10" />
               <p className="text-[10px] text-text-3 mt-1">Customers who end their session within this many minutes are charged ₹0. Applies live everywhere — session, PC cards, billing counter, member overlay.</p>
+            </div>
+
+            <div className="mt-3 p-3 bg-bg-3 border border-border rounded">
+              <label className="font-heading font-bold text-accent tracking-wider text-[10px] uppercase">Short Session Rates</label>
+              <p className="text-[10px] text-text-3 mt-0.5 mb-2">Fixed charges for sub-hour sessions. After the last slab, normal hourly rate applies.</p>
+              {slabRows.length > 0 && (
+                <div className="space-y-1.5 mb-2">
+                  {slabRows.map((row, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-1.5 items-end">
+                      <div>
+                        {i === 0 && <label className="text-[10px] text-text-3">From (min)</label>}
+                        <input type="number" min="0" step="1" className="form-control text-xs" placeholder="0" value={row.fromMinutes} onChange={e => { const v = [...slabRows]; v[i] = { ...v[i], fromMinutes: e.target.value }; setSlabRows(v); }} />
+                      </div>
+                      <div>
+                        {i === 0 && <label className="text-[10px] text-text-3">To (min)</label>}
+                        <input type="number" min="1" step="1" className="form-control text-xs" placeholder="10" value={row.toMinutes} onChange={e => { const v = [...slabRows]; v[i] = { ...v[i], toMinutes: e.target.value }; setSlabRows(v); }} />
+                      </div>
+                      <div>
+                        {i === 0 && <label className="text-[10px] text-text-3">Charge (₹)</label>}
+                        <input type="number" min="0" step="1" className="form-control text-xs" placeholder="20" value={row.amount} onChange={e => { const v = [...slabRows]; v[i] = { ...v[i], amount: e.target.value }; setSlabRows(v); }} />
+                      </div>
+                      <button type="button" onClick={() => setSlabRows(slabRows.filter((_, j) => j !== i))} className="btn-icon mb-0.5" title="Remove row">
+                        <X size={12} className="text-red-400" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button type="button" onClick={() => setSlabRows([...slabRows, { fromMinutes: '', toMinutes: '', amount: '' }])} className="text-[10px] text-accent hover:underline flex items-center gap-1">
+                <Plus size={10} /> Add slab row
+              </button>
             </div>
 
             <div className="form-group">
@@ -321,7 +355,7 @@ export default function PricingProfilesTab() {
           </div>
           <button 
             className="btn-primary flex items-center gap-2 text-xs py-1.5"
-            onClick={() => { setDrawer({ isOpen: true, data: null }); resetPackageForm(); }}
+            onClick={() => { setDrawer({ isOpen: true, data: null }); resetPackageForm(); setSlabRows([]); }}
             disabled={!selectedBranchId}
           >
             <Plus size={14} /> NEW PROFILE
@@ -371,7 +405,7 @@ export default function PricingProfilesTab() {
                     )}
                   </td>
                   <td className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => { setDrawer({ isOpen: true, data: p }); resetPackageForm(); }} className="btn-icon" title="Edit Profile">
+                    <button onClick={() => { setDrawer({ isOpen: true, data: p }); resetPackageForm(); setSlabRows((p.shortSessionSlabs || []).map(s => ({ fromMinutes: String(s.fromMinutes), toMinutes: String(s.toMinutes), amount: String(s.amount) }))); }} className="btn-icon" title="Edit Profile">
                       <Edit size={14} className="text-blue-400" />
                     </button>
                     {p.isActive && (
@@ -389,7 +423,7 @@ export default function PricingProfilesTab() {
 
       {renderDrawer()}
       {drawer.isOpen && (
-        <div className="fixed inset-0 bg-bg/60 backdrop-blur-sm z-40" onClick={() => { setDrawer({ isOpen: false, data: null }); resetPackageForm(); }} />
+        <div className="fixed inset-0 bg-bg/60 backdrop-blur-sm z-40" onClick={() => { setDrawer({ isOpen: false, data: null }); resetPackageForm(); setSlabRows([]); }} />
       )}
     </div>
   );

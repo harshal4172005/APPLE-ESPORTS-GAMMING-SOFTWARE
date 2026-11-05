@@ -18,14 +18,11 @@ namespace AppleEsportsErp.ClientAgent.Views;
 /// </summary>
 public sealed record SessionPricingInfo(
     decimal? PackagePrice, int? PlannedDurationMin, string? PackageName,
-    decimal RatePerHour, int BufferMinutes, DateTimeOffset? SessionStartUtc, int? PackageFromMin = null)
+    decimal RatePerHour, int BufferMinutes, DateTimeOffset? SessionStartUtc, int? PackageFromMin = null,
+    List<Services.SlabEntry>? ShortSessionSlabs = null)
 {
     public static readonly SessionPricingInfo None = new(null, null, null, 0m, 0, null);
 
-    /// <summary>Mirrors SessionPricingCalculator.CalculateLiveGamingAmount exactly - see that
-    /// method's own comment for the full reasoning, including why stopping well before the
-    /// planned time falls back to honest elapsed billing instead of the flat package price.
-    /// Returns null when there is nothing to price (no start time known yet).</summary>
     public decimal? PriceForElapsed(decimal elapsedMinutes)
     {
         if (SessionStartUtc is null) return null;
@@ -34,11 +31,22 @@ public sealed record SessionPricingInfo(
         if (PackagePrice.HasValue && PlannedDurationMin.HasValue)
         {
             decimal overrunMinutes = elapsedMinutes - PlannedDurationMin.Value;
-            if (elapsedMinutes < (PackageFromMin ?? PlannedDurationMin.Value - BufferMinutes)) return Math.Round((elapsedMinutes / 60m) * RatePerHour, 2);
+            if (elapsedMinutes < (PackageFromMin ?? PlannedDurationMin.Value - BufferMinutes)) return HourlyOrSlab(elapsedMinutes);
             if (overrunMinutes <= BufferMinutes) return PackagePrice.Value;
             return PackagePrice.Value + Math.Round((overrunMinutes / 60m) * RatePerHour, 2);
         }
 
+        return HourlyOrSlab(elapsedMinutes);
+    }
+
+    private decimal HourlyOrSlab(decimal elapsedMinutes)
+    {
+        if (ShortSessionSlabs is { Count: > 0 })
+        {
+            var match = ShortSessionSlabs.Where(s => elapsedMinutes > s.FromMinutes && elapsedMinutes <= s.ToMinutes)
+                .OrderByDescending(s => s.FromMinutes).FirstOrDefault();
+            if (match != null) return match.Amount;
+        }
         return Math.Round((elapsedMinutes / 60m) * RatePerHour, 2);
     }
 }

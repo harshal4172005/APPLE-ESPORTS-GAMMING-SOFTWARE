@@ -18,6 +18,14 @@ public class PricingProfileDto
     /// <summary>Custom fixed-duration packages for this profile. Empty means none configured -
     /// the customer-facing plan list falls back to the existing auto 1/2/3-hour multiples.</summary>
     public List<PricingPackageDto> Packages { get; set; } = new();
+    public List<ShortSessionSlabDto>? ShortSessionSlabs { get; set; }
+}
+
+public class ShortSessionSlabDto
+{
+    public int FromMinutes { get; set; }
+    public int ToMinutes { get; set; }
+    public decimal Amount { get; set; }
 }
 
 public class PricingPackageDto
@@ -61,6 +69,7 @@ public class CreatePricingProfileDto
     public bool IsActive { get; set; } = true;
     public string? RefreshRate { get; set; }
     public string? SystemSpecs { get; set; }
+    public List<ShortSessionSlabDto>? ShortSessionSlabs { get; set; }
 }
 
 public class UpdatePricingProfileDto
@@ -71,4 +80,5 @@ public class UpdatePricingProfileDto
     public bool IsActive { get; set; }
     public string? RefreshRate { get; set; }
     public string? SystemSpecs { get; set; }
+    public List<ShortSessionSlabDto>? ShortSessionSlabs { get; set; }
 }

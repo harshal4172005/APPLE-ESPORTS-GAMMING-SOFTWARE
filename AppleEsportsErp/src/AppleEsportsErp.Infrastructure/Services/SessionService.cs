@@ -404,7 +404,8 @@ public class SessionService : ISessionService
                     packageFromMin: session.PackageFromMin,
                 packageName: matchingPackage?.Name, ratePerHour: agentPricingProfile?.BaseHourlyRate ?? 0m,
                 bufferMinutes: agentPricingProfile?.BufferMinutes ?? SessionPricingCalculator.DefaultBufferMinutes,
-                sessionStartUtc: session.StartTime);
+                sessionStartUtc: session.StartTime,
+                shortSessionSlabs: agentPricingProfile?.ShortSessionSlabs);
 
             return new SessionDto
             {
@@ -531,7 +532,7 @@ public class SessionService : ISessionService
             // itself every other screen calls, instead of keeping its own private copy of it.
             session.GamingAmount = SessionPricingCalculator.CalculateLiveGamingAmount(
                 packagePrice, session.PackageMinutes ?? session.PlannedDurationMin,
-                ratePerHour, bufferMinutes, session.ActualDurationMin!.Value, session.PackageFromMin);
+                ratePerHour, bufferMinutes, session.ActualDurationMin!.Value, session.PackageFromMin, session.Pc?.PricingProfile?.ShortSessionSlabs);
 
             if (session.ActualDurationMin <= bufferMinutes)
             {
@@ -857,7 +858,8 @@ public class SessionService : ISessionService
                     packageFromMin: session.PackageFromMin,
                     ratePerHour: resumePricingProfile?.BaseHourlyRate ?? 0m,
                     bufferMinutes: resumePricingProfile?.BufferMinutes ?? SessionPricingCalculator.DefaultBufferMinutes,
-                    sessionStartUtc: session.StartTime);
+                    sessionStartUtc: session.StartTime,
+                    shortSessionSlabs: resumePricingProfile?.ShortSessionSlabs);
                 await _hubNotifier.BroadcastPcStatusChangeAsync(branchId, pc.Id);
                 await _hubNotifier.BroadcastSessionUpdateAsync(branchId, session.Id);
             }
@@ -1111,7 +1113,8 @@ public class SessionService : ISessionService
                     packageFromMin: session.PackageFromMin,
                     ratePerHour: session.Pc.PricingProfile?.BaseHourlyRate ?? 0m,
                     bufferMinutes: session.Pc.PricingProfile?.BufferMinutes ?? SessionPricingCalculator.DefaultBufferMinutes,
-                    sessionStartUtc: session.StartTime);
+                    sessionStartUtc: session.StartTime,
+                    shortSessionSlabs: session.Pc.PricingProfile?.ShortSessionSlabs);
             }
             await _hubNotifier.BroadcastSessionUpdateAsync(branchId, session.Id);
             await _hubNotifier.BroadcastPcStatusChangeAsync(branchId, session.PcId);
@@ -1260,7 +1263,8 @@ public class SessionService : ISessionService
                     packageFromMin: session.PackageFromMin,
                     ratePerHour: session.Pc.PricingProfile?.BaseHourlyRate ?? 0m,
                     bufferMinutes: session.Pc.PricingProfile?.BufferMinutes ?? SessionPricingCalculator.DefaultBufferMinutes,
-                    sessionStartUtc: session.StartTime);
+                    sessionStartUtc: session.StartTime,
+                    shortSessionSlabs: session.Pc.PricingProfile?.ShortSessionSlabs);
             }
 
             await _hubNotifier.BroadcastSessionUpdateAsync(branchId, session.Id);

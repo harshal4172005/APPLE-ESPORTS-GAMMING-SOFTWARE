@@ -19,10 +19,18 @@ public static class SessionPricingCalculator
     /// then billed for exact elapsed time at the given hourly rate — regardless of
     /// whether the session was booked as a fixed package or open/Pay-As-You-Go.
     /// </summary>
-    public static decimal CalculateGamingAmount(decimal ratePerHour, int bufferMinutes, decimal elapsedMinutes)
+    public static decimal CalculateGamingAmount(decimal ratePerHour, int bufferMinutes, decimal elapsedMinutes,
+        List<Domain.Entities.ShortSessionSlab>? slabs = null)
     {
         if (elapsedMinutes <= bufferMinutes)
             return 0m;
+
+        if (slabs is { Count: > 0 })
+        {
+            var match = slabs.Where(s => elapsedMinutes > s.FromMinutes && elapsedMinutes <= s.ToMinutes)
+                .OrderByDescending(s => s.FromMinutes).FirstOrDefault();
+            if (match != null) return match.Amount;
+        }
 
         decimal hours = elapsedMinutes / 60m;
         return Math.Round(hours * ratePerHour, 2);
@@ -60,7 +68,8 @@ public static class SessionPricingCalculator
     /// (planned - buffer). Played past the package, the extra minutes are hourly on top.
     public static decimal CalculateLiveGamingAmount(
         decimal? packagePrice, int? plannedDurationMin,
-        decimal ratePerHour, int bufferMinutes, decimal elapsedMinutes, int? packageFromMin = null)
+        decimal ratePerHour, int bufferMinutes, decimal elapsedMinutes, int? packageFromMin = null,
+        List<Domain.Entities.ShortSessionSlab>? slabs = null)
     {
         if (elapsedMinutes <= bufferMinutes)
             return 0m;
@@ -69,17 +78,15 @@ public static class SessionPricingCalculator
         {
             decimal overrunMinutes = elapsedMinutes - plannedDurationMin.Value;
 
-            // Stopped well short of the planned time - the package was never actually used, so
-            // there's nothing to honor. Bills exactly like Pay-As-You-Go for the time really played.
             if (elapsedMinutes < (packageFromMin ?? plannedDurationMin.Value - bufferMinutes))
-                return CalculateGamingAmount(ratePerHour, bufferMinutes, elapsedMinutes);
+                return CalculateGamingAmount(ratePerHour, bufferMinutes, elapsedMinutes, slabs);
 
             return overrunMinutes <= bufferMinutes
                 ? packagePrice.Value
                 : packagePrice.Value + CalculateGamingAmount(ratePerHour, 0, overrunMinutes);
         }
 
-        return CalculateGamingAmount(ratePerHour, bufferMinutes, elapsedMinutes);
+        return CalculateGamingAmount(ratePerHour, bufferMinutes, elapsedMinutes, slabs);
     }
 
     /// <summary>
