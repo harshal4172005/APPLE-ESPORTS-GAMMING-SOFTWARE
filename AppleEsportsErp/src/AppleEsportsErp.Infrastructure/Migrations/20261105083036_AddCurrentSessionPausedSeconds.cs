@@ -11,29 +11,16 @@ namespace AppleEsportsErp.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<DateTimeOffset>(
-                name: "OpenedAt",
-                table: "stock_counts",
-                type: "timestamp with time zone",
-                nullable: true);
-
-            migrationBuilder.AddColumn<DateTimeOffset>(
-                name: "CountedAt",
-                table: "shared_stock_counts",
-                type: "timestamp with time zone",
-                nullable: true);
-
-            migrationBuilder.AddColumn<Guid>(
-                name: "CountedByBranchId",
-                table: "shared_stock_counts",
-                type: "uuid",
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "CountedByName",
-                table: "shared_stock_counts",
-                type: "text",
-                nullable: true);
+            // OpenedAt, CountedAt, CountedByBranchId, CountedByName, PlayMinutes
+            // were already added by DbUpdater on live servers — use IF NOT EXISTS
+            // so the migration is safe on both fresh and existing databases.
+            migrationBuilder.Sql("""
+                ALTER TABLE stock_counts ADD COLUMN IF NOT EXISTS "OpenedAt" timestamptz;
+                ALTER TABLE shared_stock_counts ADD COLUMN IF NOT EXISTS "CountedAt" timestamptz;
+                ALTER TABLE shared_stock_counts ADD COLUMN IF NOT EXISTS "CountedByBranchId" uuid;
+                ALTER TABLE shared_stock_counts ADD COLUMN IF NOT EXISTS "CountedByName" text;
+                ALTER TABLE bills ADD COLUMN IF NOT EXISTS "PlayMinutes" integer;
+                """);
 
             migrationBuilder.AddColumn<int>(
                 name: "CurrentSessionPausedSeconds",
@@ -41,12 +28,6 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                 type: "integer",
                 nullable: false,
                 defaultValue: 0);
-
-            migrationBuilder.AddColumn<int>(
-                name: "PlayMinutes",
-                table: "bills",
-                type: "integer",
-                nullable: true);
         }
 
         /// <inheritdoc />
