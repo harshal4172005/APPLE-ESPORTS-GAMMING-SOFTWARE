@@ -584,7 +584,7 @@ public class BranchHeartbeatController : ControllerBase
                         PackagePriceFromMin = pkg.PackagePriceFromMin,
                         IsActive = pkg.IsActive,
                     }).ToList(),
-                ShortSessionSlabs = p.ShortSessionSlabs == null ? null : p.ShortSessionSlabs.Select(s => new Application.DTOs.Settings.ShortSessionSlabDto { FromMinutes = s.FromMinutes, ToMinutes = s.ToMinutes, Amount = s.Amount }).ToList(),
+                ShortSessionSlabs = p.ShortSessionSlabs,
             })
             .ToListAsync(ct);
 

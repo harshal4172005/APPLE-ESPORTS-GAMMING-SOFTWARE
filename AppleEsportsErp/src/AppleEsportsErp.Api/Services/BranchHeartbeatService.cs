@@ -2243,7 +2243,7 @@ public class BranchHeartbeatService : BackgroundService
         if (row.IsActive != profile.IsActive) row.IsActive = profile.IsActive;
         if (row.RefreshRate != profile.RefreshRate) row.RefreshRate = profile.RefreshRate;
         if (row.SystemSpecs != profile.SystemSpecs) row.SystemSpecs = profile.SystemSpecs;
-        row.ShortSessionSlabs = profile.ShortSessionSlabs?.Select(s => new ShortSessionSlab { FromMinutes = s.FromMinutes, ToMinutes = s.ToMinutes, Amount = s.Amount }).ToList();
+        row.ShortSessionSlabs = profile.ShortSessionSlabs;
         row.UpdatedAt = DateTimeOffset.UtcNow;
 
         var existingPackages = row.Packages?.ToDictionary(pkg => pkg.Id) ?? new Dictionary<Guid, PricingPackage>();
