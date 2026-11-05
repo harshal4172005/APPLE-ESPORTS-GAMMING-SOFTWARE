@@ -87,6 +87,7 @@ public class PcStateDto
     public decimal? SessionPackagePrice { get; set; }
     public int? SessionPlannedDurationMin { get; set; }
     public int? SessionPackageFromMin { get; set; }
+    public int SessionPausedSeconds { get; set; }
 
     /// <summary>
     /// True if PcStatusHub's shutdown command was sent to this PC and it has not reconnected

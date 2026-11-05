@@ -21,7 +21,7 @@ public class WalletSettingsController : ControllerBase
 {
     private const string ConfigKey = SystemConfigKeys.WalletTopUpRules;
     private const decimal DefaultMinGamingTopUp = 500m;
-    private const decimal DefaultBonusPercent = 10m;
+    private const decimal DefaultBonusPercent = 0m;
 
     private readonly AppDbContext _db;
 

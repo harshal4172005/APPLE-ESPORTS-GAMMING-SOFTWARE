@@ -18,7 +18,7 @@ public class WalletService : IWalletService
     // Fallback defaults, used only if Super Admin has never saved custom Wallet Settings.
     // Live values are editable via WalletSettingsController → SystemConfig["wallet_topup_rules"].
     private const decimal DefaultMinGamingTopUp = 500m;
-    private const decimal DefaultBonusPercent = 10m;
+    private const decimal DefaultBonusPercent = 0m;
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAuditService _auditService;
@@ -82,25 +82,36 @@ public class WalletService : IWalletService
         }
     }
 
-    private async Task<(decimal minGamingTopUp, decimal defaultBonusPercent)> GetTopUpRulesAsync()
+    private async Task<WalletTopUpRulesDto> GetTopUpRulesAsync()
     {
         var config = await _unitOfWork.Repository<SystemConfig>().Query()
             .FirstOrDefaultAsync(c => c.ConfigKey == SystemConfigKeys.WalletTopUpRules);
 
         if (config == null)
-            return (DefaultMinGamingTopUp, DefaultBonusPercent);
+            return new WalletTopUpRulesDto { MinGamingTopUp = DefaultMinGamingTopUp, DefaultBonusPercent = DefaultBonusPercent };
 
         try
         {
-            var rules = JsonSerializer.Deserialize<WalletTopUpRulesDto>(config.ConfigValue);
-            return rules != null
-                ? (rules.MinGamingTopUp, rules.DefaultBonusPercent)
-                : (DefaultMinGamingTopUp, DefaultBonusPercent);
+            return JsonSerializer.Deserialize<WalletTopUpRulesDto>(config.ConfigValue)
+                ?? new WalletTopUpRulesDto { MinGamingTopUp = DefaultMinGamingTopUp, DefaultBonusPercent = DefaultBonusPercent };
         }
         catch
         {
-            return (DefaultMinGamingTopUp, DefaultBonusPercent);
+            return new WalletTopUpRulesDto { MinGamingTopUp = DefaultMinGamingTopUp, DefaultBonusPercent = DefaultBonusPercent };
         }
+    }
+
+    private static decimal ResolveBonusPercent(WalletTopUpRulesDto rules, decimal amount)
+    {
+        if (rules.BonusTiers is { Count: > 0 })
+        {
+            var match = rules.BonusTiers
+                .Where(t => amount >= t.MinAmount)
+                .OrderByDescending(t => t.MinAmount)
+                .FirstOrDefault();
+            if (match != null) return match.BonusPercent;
+        }
+        return rules.DefaultBonusPercent;
     }
 
     public async Task<WalletTransactionDto> TopUpWalletAsync(Guid branchId, Guid operatorId, Guid shiftId, Guid memberId, TopUpWalletDto dto, bool isSuperAdmin)
@@ -108,15 +119,15 @@ public class WalletService : IWalletService
         if (dto.Amount <= 0)
             throw new AppException("Top-up amount must be greater than zero.");
 
-        var (minGamingTopUp, defaultBonusPercent) = await GetTopUpRulesAsync();
+        var topUpRules = await GetTopUpRulesAsync();
 
         var isGaming = dto.TargetWallet == WalletType.Gaming;
 
         if (dto.IsBonusOnly)
             throw new AppException("A bonus is not a top-up - use Extra Bonus, which never counts it as money received.");
 
-        if (isGaming && dto.Amount < minGamingTopUp)
-            throw new AppException($"Minimum Gaming wallet top-up is ₹{minGamingTopUp:0}.");
+        if (isGaming && dto.Amount < topUpRules.MinGamingTopUp)
+            throw new AppException($"Minimum Gaming wallet top-up is ₹{topUpRules.MinGamingTopUp:0}.");
 
         var isSplit = dto.PaymentType.Equals("Split", StringComparison.OrdinalIgnoreCase);
         if (isSplit)
@@ -134,11 +145,9 @@ public class WalletService : IWalletService
         var member = await _unitOfWork.Repository<Member>().GetByIdAsync(memberId)
             ?? throw new NotFoundException("Member not found.");
 
-        // Gaming top-ups earn a bonus (gaming-only, no equivalent for Food) — the admin-configured
-        // default rate, unless Super Admin overrides it for this specific top-up.
         var bonusRate = (isSuperAdmin && dto.BonusPercentOverride.HasValue)
             ? dto.BonusPercentOverride.Value / 100m
-            : defaultBonusPercent / 100m;
+            : ResolveBonusPercent(topUpRules, dto.Amount) / 100m;
         var bonusAmount = isGaming ? Math.Round(dto.Amount * bonusRate, 2) : 0m;
         var totalCredit = dto.Amount + bonusAmount;
 

@@ -426,7 +426,7 @@ public class EodService : IEodService
         var billIds = payments.Select(p => p.BillId).Distinct().ToList();
         var bills = await _unitOfWork.Repository<Bill>().Query().AsNoTracking()
             .Where(b => billIds.Contains(b.Id))
-            .Select(b => new { b.Id, b.FoodAmount, b.Subtotal, b.DiscountAmount, b.TotalAmount })
+            .Select(b => new { b.Id, b.FoodAmount, b.Subtotal, b.DiscountAmount, b.TotalAmount, b.BillNumber })
             .ToDictionaryAsync(b => b.Id);
         foreach (var p in payments)
         {
@@ -436,9 +436,24 @@ public class EodService : IEodService
             boxes.FoodCash += p.CashAmount * share;
             boxes.FoodOnline += p.OnlineAmount * share;
         }
+
+        // PS5 money, by how it was paid. Same idea as food: already counted inside Cash and
+        // Online, pulled out so the consoles can be seen on their own.
+        foreach (var p in payments)
+        {
+            if (!bills.TryGetValue(p.BillId, out var b) || !b.BillNumber.StartsWith("PS5-", StringComparison.Ordinal)) continue;
+            boxes.Ps5Cash += p.CashAmount;
+            boxes.Ps5Online += p.OnlineAmount;
+        }
+        boxes.Ps5Cash = Math.Round(boxes.Ps5Cash, 2);
+        boxes.Ps5Online = Math.Round(boxes.Ps5Online, 2);
+        boxes.Ps5 = boxes.Ps5Cash + boxes.Ps5Online;
         boxes.FoodCash = Math.Round(boxes.FoodCash, 2);
         boxes.FoodOnline = Math.Round(boxes.FoodOnline, 2);
         boxes.Food = boxes.FoodCash + boxes.FoodOnline;
+        boxes.GamingCash = Math.Round(boxes.CashFromBills - boxes.FoodCash - boxes.Ps5Cash, 2);
+        boxes.GamingOnline = Math.Round(boxes.OnlineFromBills - boxes.FoodOnline - boxes.Ps5Online, 2);
+        boxes.Gaming = boxes.GamingCash + boxes.GamingOnline;
 
         var edits = await _unitOfWork.Repository<AuditLog>().Query().AsNoTracking()
             .Where(a => a.BranchId == branchId && a.Action == AppleEsportsErp.Application.Constants.AuditActions.PaymentMethodEdit

@@ -49,6 +49,14 @@ public class Bill
     /// line in EOD, and its items cannot be removed by an operator.
     /// </summary>
     public Guid? ShortageOperatorId { get; set; }
+
+    /// <summary>
+    /// How long a PS5 customer played, in minutes (90 = 1 hr 30 min). Its own value, never buried
+    /// in the note, so it can be read, added up and sorted (owner, 5 Nov 2026). Null on every other
+    /// kind of bill and on PS5 entries made before this existed - those show "-" and are left out
+    /// of the hours total rather than guessed at. Information only: it never changes an amount.
+    /// </summary>
+    public int? PlayMinutes { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

@@ -152,6 +152,11 @@ ADD COLUMN IF NOT EXISTS ""CountedByName"" text;
 -- When the operator opened the count screen, so what moved while they counted can be shown.
 ALTER TABLE stock_counts
 ADD COLUMN IF NOT EXISTS ""OpenedAt"" timestamptz;
+
+-- How long a PS5 customer played. Nullable: every other bill, and every PS5 entry made before
+-- this, simply has none.
+ALTER TABLE bills
+ADD COLUMN IF NOT EXISTS ""PlayMinutes"" integer;
 ");
 
         // A PC that has never been claimed by a real machine used to be created as Idle -

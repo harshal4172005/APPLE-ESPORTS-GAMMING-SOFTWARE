@@ -74,14 +74,20 @@ export default function SessionDiscountModal({ isOpen, onClose, pc, onRefresh })
             </button>
           </div>
 
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-5">
             <div className="text-sm text-text-2">
               Apply a discount to the active session on <span className="text-neon-orange font-bold font-mono">{pc.name}</span>.
             </div>
 
+            {/* Current bill total */}
+            <div className="flex items-center justify-between bg-bg rounded-lg border border-border px-4 py-3">
+              <span className="text-xs text-text-3 uppercase tracking-widest font-bold">Current Bill</span>
+              <span className="font-mono font-bold text-lg text-text">₹{Number(pc.totalAmount || 0).toFixed(0)}</span>
+            </div>
+
             <label className="block">
               <span className="text-xs text-text-3 uppercase tracking-wider font-bold">Discount amount (₹)</span>
-              <div className="mt-1 flex items-center gap-2 bg-bg border border-border rounded px-3 focus-within:border-neon-orange">
+              <div className="mt-1.5 flex items-center gap-2 bg-bg border border-border rounded-lg px-3 focus-within:border-neon-orange transition-colors">
                 <span className="text-neon-orange font-mono font-bold">₹</span>
                 <input
                   type="number"
@@ -96,26 +102,34 @@ export default function SessionDiscountModal({ isOpen, onClose, pc, onRefresh })
                   className="w-full bg-transparent py-2.5 font-mono text-lg text-text outline-none"
                 />
               </div>
-              <span className="block mt-1 text-[11px] text-text-3">
+              <span className="block mt-1.5 text-[11px] text-text-3">
                 The customer pays this much less. It stays the same even if they keep playing.
               </span>
             </label>
 
-            <button
-              onClick={() => handleApply(true)}
-              disabled={loading}
-              className="w-full py-2 rounded border border-border text-text-3 text-xs font-bold tracking-widest hover:bg-bg-3 disabled:opacity-50 uppercase"
-            >
-              Remove discount
-            </button>
+            {valid && (
+              <div className="flex items-center justify-between text-xs px-1">
+                <span className="text-text-3">Customer pays</span>
+                <span className="font-mono font-bold text-neon-green">₹{Math.max(0, Number(pc.totalAmount || 0) - value).toFixed(0)}</span>
+              </div>
+            )}
 
-            <button
-              onClick={() => handleApply()}
-              disabled={loading || !valid}
-              className="w-full py-3 rounded border border-pc-active/50 bg-pc-active/10 text-pc-active font-bold tracking-widest hover:bg-pc-active/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase"
-            >
-              {loading ? 'APPLYING...' : valid ? `GIVE ₹${value} DISCOUNT` : 'APPLY DISCOUNT'}
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleApply(true)}
+                disabled={loading}
+                className="flex-1 py-2.5 rounded-lg border border-border text-text-3 text-xs font-bold tracking-widest hover:bg-bg-3 disabled:opacity-50 uppercase transition-colors"
+              >
+                Remove
+              </button>
+              <button
+                onClick={() => handleApply()}
+                disabled={loading || !valid}
+                className="flex-[2] py-2.5 rounded-lg border border-neon-orange/50 bg-neon-orange/10 text-neon-orange font-bold tracking-widest hover:bg-neon-orange/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase"
+              >
+                {loading ? 'APPLYING...' : valid ? `GIVE ₹${value} OFF` : 'APPLY DISCOUNT'}
+              </button>
+            </div>
           </div>
         </motion.div>
       </div>

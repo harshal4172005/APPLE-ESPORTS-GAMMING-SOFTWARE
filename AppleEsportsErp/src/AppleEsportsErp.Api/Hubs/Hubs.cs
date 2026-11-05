@@ -312,18 +312,13 @@ public class PcStatusHub : BranchAwareHub
             .Select(p => new { p.Id, p.State })
             .ToListAsync();
 
-        var busy = pcs.Where(p =>
+        var excluded = pcs.Where(p =>
             p.State == Domain.Enums.PcState.Active ||
-            p.State == Domain.Enums.PcState.AwaitingBilling).ToList();
+            p.State == Domain.Enums.PcState.AwaitingBilling ||
+            p.State == Domain.Enums.PcState.AwaitingSetup ||
+            p.State == Domain.Enums.PcState.UnderMaintenance).ToList();
 
-        // A PC still AwaitingSetup has no real machine that has ever claimed it - no agent
-        // listening, nothing plugged in as far as this system knows. There is nothing to send a
-        // shutdown to, and marking one PoweredOff would make an unclaimed PC look identical to a
-        // real one that was just switched off, which is exactly the distinction this state exists
-        // to preserve.
-        var neverClaimed = pcs.Where(p => p.State == Domain.Enums.PcState.AwaitingSetup).ToList();
-
-        var targets = pcs.Except(busy).Except(neverClaimed).ToList();
+        var targets = pcs.Except(excluded).ToList();
 
         // Same reasoning as SendShutdownCommand: mark these powered-off in the database so their
         // tiles actually change colour, not only send the live command. Loaded separately from
@@ -379,9 +374,9 @@ public class PcStatusHub : BranchAwareHub
 
         Logger.LogWarning(
             "Shut down all PCs at branch {BranchId}: {Sent} sent, {Skipped} skipped as busy, by {Role} {User}",
-            branchId, targets.Count, busy.Count, actorRole, actorName);
+            branchId, targets.Count, excluded.Count, actorRole, actorName);
 
-        return new { sent = targets.Count, skippedBusy = busy.Count };
+        return new { sent = targets.Count, skippedBusy = excluded.Count };
     }
 
     /// <summary>

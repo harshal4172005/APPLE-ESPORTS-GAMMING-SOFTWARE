@@ -177,6 +177,7 @@ public class BranchHeartbeatService : BackgroundService
                 SessionPackagePrice = p.CurrentSession != null ? p.CurrentSession.PackagePrice : null,
                 SessionPlannedDurationMin = p.CurrentSession != null ? p.CurrentSession.PackageMinutes ?? p.CurrentSession.PlannedDurationMin : null,
                 SessionPackageFromMin = p.CurrentSession != null ? p.CurrentSession.PackageFromMin : null,
+                    SessionPausedSeconds = p.CurrentSession != null ? p.CurrentSession.PausedSeconds : 0,
                 PoweredOff = p.PoweredOff,
             })
             .ToListAsync(ct);

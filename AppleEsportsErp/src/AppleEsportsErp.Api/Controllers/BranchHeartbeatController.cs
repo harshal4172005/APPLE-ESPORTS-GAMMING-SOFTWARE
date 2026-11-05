@@ -830,6 +830,7 @@ public class BranchHeartbeatController : ControllerBase
             pc.CurrentSessionPackagePrice = reported.SessionPackagePrice;
             pc.CurrentSessionPlannedDurationMin = reported.SessionPlannedDurationMin;
             pc.CurrentSessionPackageFromMin = reported.SessionPackageFromMin;
+            pc.CurrentSessionPausedSeconds = reported.SessionPausedSeconds;
             pc.PoweredOff = reported.PoweredOff;
             pc.LastActiveAt = DateTimeOffset.UtcNow;
             pc.UpdatedAt = DateTimeOffset.UtcNow;

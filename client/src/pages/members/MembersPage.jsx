@@ -231,8 +231,8 @@ function TopUpModal({ member, isSuperAdmin, onClose, onSuccess }) {
   const [splitCash, setSplitCash] = useState('');
   const [splitOnline, setSplitOnline] = useState('');
   const [walletType, setWalletType] = useState(member?.tempTarget || 'Gaming');
-  const [topUpRules, setTopUpRules] = useState({ minGamingTopUp: 500, defaultBonusPercent: 10 });
-  const [bonusPercent, setBonusPercent] = useState(10);
+  const [topUpRules, setTopUpRules] = useState({ minGamingTopUp: 500, defaultBonusPercent: 0 });
+  const [bonusPercent, setBonusPercent] = useState(0);
   const [isCustomBonus, setIsCustomBonus] = useState(false);
   const [customBonusInput, setCustomBonusInput] = useState('');
   const [reason, setReason] = useState('');
@@ -247,8 +247,18 @@ function TopUpModal({ member, isSuperAdmin, onClose, onSuccess }) {
           setBonusPercent(res.data.defaultBonusPercent);
         }
       })
-      .catch(() => {}); // fall back to the 500/10 defaults already in state
+      .catch(() => {});
   }, []);
+
+  // Auto-select the right bonus tier when the amount changes (unless super admin picked a custom %)
+  useEffect(() => {
+    if (isCustomBonus) return;
+    const tiers = topUpRules.bonusTiers || [];
+    if (tiers.length === 0) { setBonusPercent(topUpRules.defaultBonusPercent); return; }
+    const amt = parseFloat(amount) || 0;
+    const match = [...tiers].sort((a, b) => b.minAmount - a.minAmount).find(t => amt >= t.minAmount);
+    setBonusPercent(match ? match.bonusPercent : topUpRules.defaultBonusPercent);
+  }, [amount, topUpRules, isCustomBonus]);
 
   const numAmount = parseFloat(amount) || 0;
   const numSplitCash = parseFloat(splitCash) || 0;
@@ -540,6 +550,13 @@ function AdminEditValuesModal({ member, onClose, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Quick add/subtract
+  const [adjWallet, setAdjWallet] = useState('gaming');
+  const [adjOp, setAdjOp] = useState('add');
+  const [adjAmount, setAdjAmount] = useState('');
+  const [adjReason, setAdjReason] = useState('');
+  const [adjBusy, setAdjBusy] = useState(false);
+
   const handleChange = (key, val) => setValues(prev => ({ ...prev, [key]: val }));
 
   const handleSave = async () => {
@@ -560,12 +577,40 @@ function AdminEditValuesModal({ member, onClose, onSuccess }) {
       };
       const result = await adminEditMemberValues(member.id, payload);
       onClose();
-      // From Head Office the branch applies it: "Sending to branch..." then "Applied", or why not.
       reportBranchCommand(toast, result, { done: `${member.fullName}'s values updated`, refresh: onSuccess });
     } catch (err) {
       setError(err.response?.data?.error || err.response?.data?.message || 'Failed to save changes');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAdjust = async () => {
+    const amt = Number(adjAmount);
+    if (!amt || amt <= 0) { setError('Enter a positive amount'); return; }
+    setError(null);
+    setAdjBusy(true);
+    try {
+      const key = adjWallet === 'gaming' ? 'gamingBalance' : 'foodBalance';
+      const current = Number(values[key]) || 0;
+      const newVal = adjOp === 'add' ? current + amt : current - amt;
+      const label = adjWallet === 'gaming' ? 'Gaming' : 'Food';
+      const payload = {
+        [key]: newVal,
+        reason: adjReason.trim() || `${adjOp === 'add' ? 'Added' : 'Subtracted'} ₹${amt} ${adjOp === 'add' ? 'to' : 'from'} ${label} balance`,
+      };
+      const result = await adminEditMemberValues(member.id, payload);
+      handleChange(key, newVal);
+      setAdjAmount('');
+      setAdjReason('');
+      reportBranchCommand(toast, result, {
+        done: `${adjOp === 'add' ? '+' : '-'}₹${amt} ${label} → ${member.fullName} (new: ₹${newVal.toFixed(2)})`,
+        refresh: onSuccess,
+      });
+    } catch (err) {
+      setError(err.response?.data?.error || err.response?.data?.message || 'Failed');
+    } finally {
+      setAdjBusy(false);
     }
   };
 
@@ -586,59 +631,129 @@ function AdminEditValuesModal({ member, onClose, onSuccess }) {
         </div>
 
         <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto">
-          <div className="flex items-start gap-2 p-3 bg-neon-orange/10 border border-neon-orange/20 rounded-lg text-neon-orange text-xs">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <p>These numbers directly override the member's profile. Balance changes are logged as a "Correction" transaction in their history so there's a paper trail.</p>
-          </div>
-
           {error && (
             <div className="flex items-start gap-2 p-3 bg-neon-red/10 border border-neon-red/20 rounded-lg text-neon-red text-sm">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /><p>{error}</p>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            {EDITABLE_FIELDS.map(f => (
-              <div key={f.key} className="form-group">
-                <label className="block text-[10px] text-text-3 uppercase tracking-widest font-bold mb-1.5">{f.label}</label>
+          {/* Quick Add / Subtract */}
+          <div className="p-4 bg-bg-3 border border-accent/20 rounded-xl space-y-3">
+            <div className="text-[10px] text-accent uppercase tracking-widest font-bold">Quick Add / Subtract</div>
+            <div className="flex gap-2">
+              {['add', 'subtract'].map(op => (
+                <button key={op} type="button" onClick={() => setAdjOp(op)}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider border transition-all ${
+                    adjOp === op
+                      ? op === 'add' ? 'bg-neon-green/15 border-neon-green/50 text-neon-green' : 'bg-neon-red/15 border-neon-red/50 text-neon-red'
+                      : 'bg-bg-2 border-border text-text-3 hover:border-text-3'
+                  }`}>
+                  {op === 'add' ? '+ Add' : '− Subtract'}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              {['gaming', 'food'].map(w => (
+                <button key={w} type="button" onClick={() => setAdjWallet(w)}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider border transition-all ${
+                    adjWallet === w
+                      ? 'bg-accent/15 border-accent/50 text-accent'
+                      : 'bg-bg-2 border-border text-text-3 hover:border-text-3'
+                  }`}>
+                  {w === 'gaming' ? 'Gaming Wallet' : 'Food Wallet'}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <label className="block text-[10px] text-text-3 uppercase tracking-widest font-bold mb-1">Amount (₹)</label>
+                <input type="number" min="0" step="0.01" value={adjAmount} onChange={e => setAdjAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full bg-bg border border-border text-text rounded-lg px-3 py-2 font-mono text-sm focus:border-accent focus:ring-1 focus:ring-accent transition-all" />
+              </div>
+              <div className="flex-1">
+                <label className="block text-[10px] text-text-3 uppercase tracking-widest font-bold mb-1">Reason <span className="normal-case font-normal">(optional)</span></label>
+                <input type="text" value={adjReason} onChange={e => setAdjReason(e.target.value)}
+                  placeholder="e.g. Refund"
+                  className="w-full bg-bg border border-border text-text rounded-lg px-3 py-2 text-sm focus:border-accent focus:ring-1 focus:ring-accent transition-all placeholder:text-text-3" />
+              </div>
+            </div>
+            <div className="text-[10px] text-text-3 font-mono">
+              Current {adjWallet === 'gaming' ? 'Gaming' : 'Food'}: ₹{Number(values[adjWallet === 'gaming' ? 'gamingBalance' : 'foodBalance']).toFixed(2)}
+              {adjAmount && Number(adjAmount) > 0 && (
+                <span className={adjOp === 'add' ? ' text-neon-green' : ' text-neon-red'}>
+                  {' → ₹'}
+                  {(Number(values[adjWallet === 'gaming' ? 'gamingBalance' : 'foodBalance']) + (adjOp === 'add' ? 1 : -1) * Number(adjAmount)).toFixed(2)}
+                </span>
+              )}
+            </div>
+            <button type="button" onClick={handleAdjust} disabled={adjBusy || !adjAmount}
+              className={`w-full py-2.5 rounded-lg text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all border disabled:opacity-50 ${
+                adjOp === 'add'
+                  ? 'bg-neon-green/10 border-neon-green/50 text-neon-green hover:bg-neon-green/20'
+                  : 'bg-neon-red/10 border-neon-red/50 text-neon-red hover:bg-neon-red/20'
+              }`}>
+              {adjBusy
+                ? <div className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                : adjOp === 'add' ? '+ Add to Balance' : '− Subtract from Balance'
+              }
+            </button>
+          </div>
+
+          {/* Direct override fields */}
+          <details className="group">
+            <summary className="cursor-pointer text-[10px] text-text-3 uppercase tracking-widest font-bold flex items-center gap-1 select-none">
+              <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+              Direct Override (Advanced)
+            </summary>
+            <div className="mt-3 space-y-3">
+              <div className="flex items-start gap-2 p-3 bg-neon-orange/10 border border-neon-orange/20 rounded-lg text-neon-orange text-xs">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <p>These numbers directly override the member's profile. Balance changes are logged as a "Correction" transaction.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {EDITABLE_FIELDS.map(f => (
+                  <div key={f.key} className="form-group">
+                    <label className="block text-[10px] text-text-3 uppercase tracking-widest font-bold mb-1.5">{f.label}</label>
+                    <input
+                      type="number" step={f.step}
+                      value={values[f.key]}
+                      onChange={e => handleChange(f.key, e.target.value)}
+                      className="w-full bg-bg-3 border border-border text-text rounded-lg px-3 py-2 font-mono text-sm focus:border-neon-orange focus:ring-1 focus:ring-neon-orange transition-all"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label className="block text-[10px] text-text-3 uppercase tracking-widest font-bold mb-2">Reason <span className="normal-case font-normal">(optional)</span></label>
                 <input
-                  type="number" step={f.step}
-                  value={values[f.key]}
-                  onChange={e => handleChange(f.key, e.target.value)}
-                  className="w-full bg-bg-3 border border-border text-text rounded-lg px-3 py-2 font-mono text-sm focus:border-neon-orange focus:ring-1 focus:ring-neon-orange transition-all"
+                  type="text"
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  placeholder="e.g. Correcting a data entry mistake"
+                  className="w-full bg-bg-3 border border-border text-text rounded-lg px-3 py-2.5 text-sm focus:border-neon-orange focus:ring-1 focus:ring-neon-orange transition-all placeholder:text-text-3"
                 />
               </div>
-            ))}
-          </div>
-
-          <div>
-            <label className="block text-[10px] text-text-3 uppercase tracking-widest font-bold mb-2">Reason <span className="normal-case font-normal">(optional)</span></label>
-            <input
-              type="text"
-              value={reason}
-              onChange={e => setReason(e.target.value)}
-              placeholder="e.g. Correcting a data entry mistake"
-              className="w-full bg-bg-3 border border-border text-text rounded-lg px-3 py-2.5 text-sm focus:border-neon-orange focus:ring-1 focus:ring-neon-orange transition-all placeholder:text-text-3"
-            />
-          </div>
+              <button
+                onClick={handleSave}
+                disabled={loading}
+                className="w-full py-2.5 rounded-lg border text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all bg-neon-orange/10 border-neon-orange/50 text-neon-orange hover:bg-neon-orange/20 disabled:opacity-50"
+              >
+                {loading
+                  ? <div className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                  : <><SlidersHorizontal className="w-4 h-4" /> Override All Values</>
+                }
+              </button>
+            </div>
+          </details>
         </div>
 
-        <div className="p-4 border-t border-border bg-bg-3 flex gap-3">
+        <div className="p-4 border-t border-border bg-bg-3">
           <button
             onClick={onClose}
-            className="flex-1 py-2.5 rounded-lg border border-border text-text-2 text-sm font-bold uppercase tracking-wider hover:bg-bg-2 transition-colors"
+            className="w-full py-2.5 rounded-lg border border-border text-text-2 text-sm font-bold uppercase tracking-wider hover:bg-bg-2 transition-colors"
           >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="flex-[2] py-2.5 rounded-lg border text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all bg-neon-orange/10 border-neon-orange/50 text-neon-orange hover:bg-neon-orange/20 disabled:opacity-50"
-          >
-            {loading
-              ? <div className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
-              : <><SlidersHorizontal className="w-4 h-4" /> Save Changes</>
-            }
+            Close
           </button>
         </div>
       </div>

@@ -246,6 +246,16 @@ public class OperatorBoxesDto
     public decimal FoodOnline { get; set; }
     public decimal Food { get; set; }
 
+    /// <summary>PS5 money taken today, split by how it was paid. Already inside Cash and Online -
+    /// a PS5 entry is an ordinary bill - and shown on its own so the owner can see what the
+    /// consoles brought in (owner, 5 Nov 2026).</summary>
+    public decimal Ps5Cash { get; set; }
+    public decimal Ps5Online { get; set; }
+    public decimal Ps5 { get; set; }
+    public decimal GamingCash { get; set; }
+    public decimal GamingOnline { get; set; }
+    public decimal Gaming { get; set; }
+
     public int PaymentMethodEdits { get; set; }
     /// <summary>Edits that changed cash but could not move a drawer (it was already closed).</summary>
     public int PaymentMethodEditsNotInDrawer { get; set; }

@@ -37,6 +37,8 @@ export default function OperatorBoxes({ report, showLabel }) {
       ['Member top-ups', ob.onlineFromTopUps], ['Reservation deposits', ob.onlineFromReservationDeposits],
     ],
     food: [['Paid in cash', ob.foodCash], ['Paid online', ob.foodOnline]],
+    ps5: [['Paid in cash', ob.ps5Cash], ['Paid online', ob.ps5Online]],
+    gaming: [['Paid in cash', ob.gamingCash], ['Paid online', ob.gamingOnline]],
   };
 
   const Box = ({ id, label, value, accent, sub }) => (
@@ -66,12 +68,16 @@ export default function OperatorBoxes({ report, showLabel }) {
       {showLabel && (
         <div className="text-text-3 text-[11px] uppercase font-bold tracking-widest mb-2">What the operator sees</div>
       )}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 items-start">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 items-start">
         <Box id="total" label="Total" value={total} accent />
         <Box id="cash" label="Cash" value={cash} />
         <Box id="online" label="Online" value={online} />
         <Box id="food" label="Food" value={food}
           sub={ob ? `cash ${rs(ob.foodCash)} + online ${rs(ob.foodOnline)}` : undefined} />
+        <Box id="ps5" label="PS5" value={n(ob?.ps5)}
+          sub={ob ? `cash ${rs(ob.ps5Cash)} + online ${rs(ob.ps5Online)}` : undefined} />
+        <Box id="gaming" label="Gaming" value={n(ob?.gaming)}
+          sub={ob ? `cash ${rs(ob.gamingCash)} + online ${rs(ob.gamingOnline)}` : undefined} />
       </div>
       {ob && ob.paymentMethodEdits > 0 && (
         <div className="mt-2 flex items-center gap-2 text-xs text-neon-orange">
@@ -80,7 +86,7 @@ export default function OperatorBoxes({ report, showLabel }) {
           {ob.paymentMethodEditsNotInDrawer > 0 && ` (${ob.paymentMethodEditsNotInDrawer} after the drawer was closed — the counted drawer will not match Cash by that much)`}
         </div>
       )}
-      {parts && <div className="mt-1 text-[10px] text-text-3">Tap a box to see what it is made of. Food is already inside Cash and Online.</div>}
+      {parts && <div className="mt-1 text-[10px] text-text-3">Tap a box to see what it is made of. Food, PS5 and Gaming are already inside Cash and Online.</div>}
     </div>
   );
 }

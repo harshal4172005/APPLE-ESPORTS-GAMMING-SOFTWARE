@@ -13,13 +13,13 @@ import { computeRoundedBreakdown } from '../../utils/billRounding';
 import { logActivity } from '../../utils/sessionLog';
 import { getSessionActivities } from '../../api/sessions.api';
 
-function useElapsedTime(startTimeIso) {
+function useElapsedTime(startTimeIso, pausedSeconds = 0) {
   const [elapsed, setElapsed] = useState({ h: 0, m: 0, s: 0, totalMin: 0 });
 
   useEffect(() => {
     if (!startTimeIso) return;
     const update = () => {
-      const diffMs = Date.now() - new Date(startTimeIso).getTime();
+      const diffMs = Date.now() - new Date(startTimeIso).getTime() - (pausedSeconds * 1000);
       const totalSec = Math.max(0, Math.floor(diffMs / 1000));
       const h = Math.floor(totalSec / 3600);
       const m = Math.floor((totalSec % 3600) / 60);
@@ -29,7 +29,7 @@ function useElapsedTime(startTimeIso) {
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [startTimeIso]);
+  }, [startTimeIso, pausedSeconds]);
 
   return elapsed;
 }
@@ -78,7 +78,7 @@ export default function PcDetailPanel({
   const { user, canApplyDiscount } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
-  const elapsed = useElapsedTime(pc?.sessionStartTime);
+  const elapsed = useElapsedTime(pc?.sessionStartTime, pc?.pausedSeconds || 0);
   const [activities, setActivities] = useState([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
 
@@ -329,7 +329,7 @@ export default function PcDetailPanel({
               </div>
             </div>
 
-            <div className={`grid ${pc.sessionEndTime ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5`}>
+            <div className="grid grid-cols-2 gap-1.5">
               <ActionBtn
                 color="red"
                 icon={<Square className="w-3 h-3" />}
@@ -367,25 +367,18 @@ export default function PcDetailPanel({
                   onClick={() => setShowPackageModal(true)}
                 />
               )}
-            </div>
-
-            <div className={`grid ${(user?.role === 'super_admin' || (user?.role === 'admin' && user?.dashboardPermissions?.discount === true)) ? 'grid-cols-2' : 'grid-cols-1'} gap-1.5`}>
               <ActionBtn
                 color="green"
                 icon={<Coffee className="w-3 h-3" />}
                 label="Food"
                 onClick={() => navigate('/app/food-orders', { state: { autoSelectPcId: pc.id } })}
-                small
               />
-              {/* Same rule as the billing counter's discount chips and as the server's
-                  own check, expressed once in AuthContext rather than copied per screen. */}
               {canApplyDiscount() ? (
                 <ActionBtn
                   color="purple"
                   icon={<Gift className="w-3 h-3" />}
                   label="Discount"
                   onClick={() => setShowDiscountModal(true)}
-                  small
                 />
               ) : null}
             </div>

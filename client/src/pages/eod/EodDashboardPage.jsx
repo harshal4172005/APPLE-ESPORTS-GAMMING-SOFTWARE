@@ -16,6 +16,13 @@ import Ps5LogCard from '../../components/eod/Ps5LogCard';
 import OperatorBoxes from '../../components/eod/OperatorBoxes';
 import { format } from 'date-fns';
 
+// "1 hr 30 min" for the PS5 log; a dash for entries made before hours were recorded.
+const ps5Time = (mins) => {
+  if (!mins) return '-';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h > 0 && m > 0 ? `${h} hr ${m} min` : h > 0 ? `${h} hr` : `${m} min`;
+};
+
 /**
  * Buckets bill-like rows (bills, credit clearances, wallet top-ups - anything with a `date`)
  * into the shift whose [loginTime, logoutTime ?? now] window contains it, so the day's billing
@@ -174,6 +181,10 @@ export default function EodDashboardPage() {
   const [pcs, setPcs] = useState([]);
   const [allBills, setAllBills] = useState([]);
   const [ps5Entries, setPs5Entries] = useState([]);
+  // What actually came in over the range, and per day - the only total this page shows for a
+  // range now (owner, 5 Nov 2026: "don't show customer bought amount, only money received").
+  const [rangeCollected, setRangeCollected] = useState(null);
+  const [rangeCollectedDaily, setRangeCollectedDaily] = useState([]);
   // Every shift touching this window, so the billing log can be read shift by shift instead of
   // as one undifferentiated list for the whole trading day.
   const [shifts, setShifts] = useState([]);
@@ -233,6 +244,8 @@ export default function EodDashboardPage() {
       setDowntime(billsRes.data?.data?.downtime || []);
       setShifts(billsRes.data?.data?.shifts || []);
       setRangeDaily(billsRes.data?.data?.daily || []);
+      setRangeCollected(billsRes.data?.data?.collected || null);
+      setRangeCollectedDaily(billsRes.data?.data?.collectedDaily || []);
       setRangeCredits(billsRes.data?.data?.allCredits || []);
 
       // Fetch maintenance logs separately so it doesn't break EOD if it fails
@@ -352,10 +365,10 @@ export default function EodDashboardPage() {
       }), { gaming: 0, food: 0, discount: 0, net: 0 });
 
       y = addStatGrid(doc, y, [
-        { label: 'Total Net Revenue', value: `Rs ${rangeTotals.net.toFixed(2)}` },
-        { label: 'Gaming Revenue', value: `Rs ${rangeTotals.gaming.toFixed(2)}` },
-        { label: 'Food Revenue', value: `Rs ${rangeTotals.food.toFixed(2)}` },
-        { label: 'Discounts Applied', value: `Rs ${rangeTotals.discount.toFixed(2)}` },
+        { label: 'Money Received', value: `Rs ${Number(rangeCollected?.total ?? 0).toFixed(2)}` },
+        { label: 'Cash', value: `Rs ${Number(rangeCollected?.cash ?? 0).toFixed(2)}` },
+        { label: 'Online', value: `Rs ${Number(rangeCollected?.online ?? 0).toFixed(2)}` },
+        { label: 'Paid Out', value: `Rs ${Number(rangeCollected?.paidOut ?? 0).toFixed(2)}` },
       ]);
       y += 10;
 
@@ -494,15 +507,15 @@ export default function EodDashboardPage() {
       y = addTable(doc, y, {
         title, subtitle,
         heading: `PS5 Transaction Log (${rangeLabel})`,
-        head: ['Date', 'Customer', 'Note', 'Payment', 'Cash', 'Online', 'Credit', 'Total', 'Operator'],
+        head: ['Date', 'Person', 'Hours', 'Note', 'Payment', 'Cash', 'Online', 'Credit', 'Total', 'Operator'],
         body: [
           ...ps5Entries.map(r => [
-            r.date ? format(new Date(r.date), 'MMM d, hh:mm a') : '-', r.customer, r.note || '-', r.paymentType,
+            r.date ? format(new Date(r.date), 'MMM d, hh:mm a') : '-', r.customer, ps5Time(r.playMinutes), r.note || '-', r.paymentType,
             `Rs ${Number(r.cash).toFixed(2)}`, `Rs ${Number(r.online).toFixed(2)}`,
             r.credit > 0 ? `Rs ${Number(r.credit).toFixed(2)}${r.creditStatus === 'cleared' ? ' (cleared)' : ''}` : '-',
             `Rs ${Number(r.total).toFixed(2)}`, r.operator,
           ]),
-          ['TOTAL', '', '', '', `Rs ${t('cash').toFixed(2)}`, `Rs ${t('online').toFixed(2)}`, `Rs ${t('credit').toFixed(2)}`, `Rs ${t('total').toFixed(2)}`, ''],
+          ['TOTAL', '', ps5Time(t('playMinutes')), '', '', `Rs ${t('cash').toFixed(2)}`, `Rs ${t('online').toFixed(2)}`, `Rs ${t('credit').toFixed(2)}`, `Rs ${t('total').toFixed(2)}`, ''],
         ],
       });
     }
@@ -1015,56 +1028,68 @@ export default function EodDashboardPage() {
 
             return (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {/* Money received, and what it is made of. The billed figure used to sit here under
+                    the heading "Total Net Revenue", which read as cash and sent the owner to a
+                    calculator to add up seven daily cards by hand. */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-                    <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Total Net Revenue</div>
-                    <div className="text-3xl font-mono font-bold text-accent">₹{rangeTotals.net.toFixed(2)}</div>
+                    <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Money Received</div>
+                    <div className="text-3xl font-mono font-bold text-accent">₹{Number(rangeCollected?.total ?? 0).toFixed(2)}</div>
+                    <div className="text-[10px] text-text-3 mt-1">cash + online for this range</div>
                   </div>
                   <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-                    <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Gaming Revenue</div>
-                    <div className="text-2xl font-mono font-bold text-text">₹{rangeTotals.gaming.toFixed(2)}</div>
+                    <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Cash</div>
+                    <div className="text-2xl font-mono font-bold text-text">₹{Number(rangeCollected?.cash ?? 0).toFixed(2)}</div>
                   </div>
                   <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-                    <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Food Revenue</div>
-                    <div className="text-2xl font-mono font-bold text-text">₹{rangeTotals.food.toFixed(2)}</div>
+                    <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Online</div>
+                    <div className="text-2xl font-mono font-bold text-text">₹{Number(rangeCollected?.online ?? 0).toFixed(2)}</div>
                   </div>
                   <div className="bg-bg-2 p-5 rounded-xl border border-border shadow-lg">
-                    <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Discounts Applied</div>
-                    <div className="text-2xl font-mono font-bold text-text">₹{rangeTotals.discount.toFixed(2)}</div>
+                    <div className="text-text-3 text-xs uppercase font-bold tracking-widest mb-1">Paid Out</div>
+                    <div className="text-2xl font-mono font-bold text-text">₹{Number(rangeCollected?.paidOut ?? 0).toFixed(2)}</div>
+                    <div className="text-[10px] text-text-3 mt-1">expenses and owner takeouts</div>
                   </div>
                 </div>
 
                 <div className="card bg-bg-2 border border-border p-6 rounded-xl shadow-lg">
                   <h2 className="font-heading font-extrabold text-sm uppercase tracking-wider text-text flex items-center gap-2 mb-6">
                     <FileText className="w-4.5 h-4.5 text-accent" />
-                    Daily Revenue Breakdown ({rangeLabel})
+                    Money Received Day by Day ({rangeLabel})
                   </h2>
                   <div className="overflow-x-auto">
-                    {rangeDaily.length === 0 ? (
+                    {rangeCollectedDaily.length === 0 ? (
                       <div className="text-center text-text-3 text-xs italic py-8 border border-dashed border-border rounded-lg">
-                        No billing records found in this range.
+                        No money was taken in this range.
                       </div>
                     ) : (
                       <table className="w-full text-left border-collapse text-xs">
                         <thead>
                           <tr className="border-b border-border text-text-3 uppercase tracking-wider font-bold text-[10px]">
                             <th className="py-2.5 px-4">Date</th>
-                            <th className="py-2.5 px-4 text-right">Net Gaming</th>
-                            <th className="py-2.5 px-4 text-right">Net Food & Drink</th>
-                            <th className="py-2.5 px-4 text-right">Discount</th>
-                            <th className="py-2.5 px-4 text-right">Total</th>
+                            <th className="py-2.5 px-4 text-right">Cash</th>
+                            <th className="py-2.5 px-4 text-right">Online</th>
+                            <th className="py-2.5 px-4 text-right">Paid Out</th>
+                            <th className="py-2.5 px-4 text-right">Received</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/40 font-mono">
-                          {rangeDaily.map(day => (
+                          {rangeCollectedDaily.map(day => (
                             <tr key={day.date} className="hover:bg-bg-3/40 transition-colors">
                               <td className="py-2 px-4 text-text-2">{day.date}</td>
-                              <td className="py-2 px-4 text-right text-text">₹{day.gamingRevenue.toFixed(2)}</td>
-                              <td className="py-2 px-4 text-right text-text">₹{day.foodRevenue.toFixed(2)}</td>
-                              <td className="py-2 px-4 text-right text-neon-red">{day.discountAmount > 0 ? `-₹${day.discountAmount.toFixed(2)}` : '-'}</td>
-                              <td className="py-2 px-4 text-right text-neon-green font-bold">₹{day.totalRevenue.toFixed(2)}</td>
+                              <td className="py-2 px-4 text-right text-text">₹{Number(day.cash).toFixed(2)}</td>
+                              <td className="py-2 px-4 text-right text-text">₹{Number(day.online).toFixed(2)}</td>
+                              <td className="py-2 px-4 text-right text-neon-red">{Number(day.paidOut) > 0 ? `-₹${Number(day.paidOut).toFixed(2)}` : '-'}</td>
+                              <td className="py-2 px-4 text-right text-neon-green font-bold">₹{Number(day.collected).toFixed(2)}</td>
                             </tr>
                           ))}
+                          <tr className="border-t-2 border-border font-bold">
+                            <td className="py-2 px-4">TOTAL</td>
+                            <td className="py-2 px-4 text-right">₹{Number(rangeCollected?.cash ?? 0).toFixed(2)}</td>
+                            <td className="py-2 px-4 text-right">₹{Number(rangeCollected?.online ?? 0).toFixed(2)}</td>
+                            <td className="py-2 px-4 text-right text-neon-red">{Number(rangeCollected?.paidOut ?? 0) > 0 ? `-₹${Number(rangeCollected.paidOut).toFixed(2)}` : '-'}</td>
+                            <td className="py-2 px-4 text-right text-accent">₹{Number(rangeCollected?.total ?? 0).toFixed(2)}</td>
+                          </tr>
                         </tbody>
                       </table>
                     )}

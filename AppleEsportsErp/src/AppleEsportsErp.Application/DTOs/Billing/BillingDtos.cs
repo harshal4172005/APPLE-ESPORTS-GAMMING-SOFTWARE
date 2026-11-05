@@ -130,4 +130,8 @@ public class CreatePs5BillDto
 
     [MaxLength(120)]
     public string? Note { get; set; }
+
+    /// <summary>How long they played, in minutes (90 = 1 hr 30 min). Required, up to a full day.</summary>
+    [Range(1, 1440)]
+    public int PlayMinutes { get; set; }
 }

@@ -67,6 +67,56 @@ public class EodController : ControllerBase
             .OrderBy(r => r.Date)
             .ToList();
 
+        // Money that actually came in, per day, in one pass.
+        //
+        // The owner added seven daily "What the operator sees" Totals on a calculator because the
+        // range view had no such figure at all - it only ever showed what customers were BILLED,
+        // under a heading that read like cash (22-28 Oct at Citylight S2: billed Rs 18,820 against
+        // Rs 24,290 actually received, the gap being mostly one Rs 5,500 wallet top-up). Same
+        // formula as the single-day card: cash + online, top-ups included, less what left the
+        // drawer. Computed here, once, rather than by calling /eod/preview once per day.
+        var payments = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.Payment>().Query().AsNoTracking()
+            .Where(x => x.BranchId == targetBranchId && x.CreatedAt >= startUtc && x.CreatedAt <= endUtc)
+            .Select(x => new { x.CreatedAt, x.CashAmount, x.OnlineAmount })
+            .ToListAsync();
+        var topUps = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.WalletTransaction>().Query().AsNoTracking()
+            .Where(x => x.BranchId == targetBranchId && x.Action == AppleEsportsErp.Domain.Enums.WalletAction.Recharge
+                        && x.CreatedAt >= startUtc && x.CreatedAt <= endUtc)
+            .Select(x => new { x.CreatedAt, x.CashAmount, x.OnlineAmount })
+            .ToListAsync();
+        var drawerMoves = await _unitOfWork.Repository<AppleEsportsErp.Domain.Entities.CashTransaction>().Query().AsNoTracking()
+            .Where(x => x.BranchId == targetBranchId && x.CreatedAt >= startUtc && x.CreatedAt <= endUtc)
+            .Select(x => new { x.CreatedAt, x.CashAmount, x.TransactionType })
+            .ToListAsync();
+
+        var collectedByDay = new Dictionary<DateOnly, (decimal Cash, decimal Online, decimal Inward, decimal Out)>();
+        void Add(DateTimeOffset at, decimal cash, decimal online, decimal inward, decimal paidOut)
+        {
+            var day = IndiaTime.BusinessDayOf(at);
+            var c = collectedByDay.GetValueOrDefault(day);
+            collectedByDay[day] = (c.Cash + cash, c.Online + online, c.Inward + inward, c.Out + paidOut);
+        }
+        foreach (var x in payments) Add(x.CreatedAt, x.CashAmount, x.OnlineAmount, 0, 0);
+        foreach (var x in topUps) Add(x.CreatedAt, x.CashAmount, x.OnlineAmount, 0, 0);
+        foreach (var x in drawerMoves)
+        {
+            if (x.TransactionType == "inward") Add(x.CreatedAt, 0, 0, x.CashAmount, 0);
+            else if (x.TransactionType is "petty_expense" or "withdrawal") Add(x.CreatedAt, 0, 0, 0, Math.Abs(x.CashAmount));
+        }
+
+        var collectedDaily = collectedByDay
+            .Select(kv => new
+            {
+                Date = kv.Key.ToString("yyyy-MM-dd"),
+                Cash = kv.Value.Cash,
+                Online = kv.Value.Online,
+                CashInwards = kv.Value.Inward,
+                PaidOut = kv.Value.Out,
+                Collected = kv.Value.Cash + kv.Value.Online + kv.Value.Inward - kv.Value.Out,
+            })
+            .OrderBy(r => r.Date)
+            .ToList();
+
         var monthlyReport = billsByBusinessDay
             .GroupBy(x => new { x.BusinessDay.Year, x.BusinessDay.Month })
             .Select(g => new {
@@ -159,10 +209,16 @@ public class EodController : ControllerBase
             var note = ps5Notes.GetValueOrDefault(b.Id, "");
             return new
             {
+                BillId = b.Id,
                 BillNumber = b.BillNumber,
                 Date = b.CompletedAt,
                 Customer = b.CustomerName ?? "Walk-in",
-                Note = note.StartsWith("PS5 - ") ? note[6..] : "",
+                PlayMinutes = b.PlayMinutes,
+                // The bill line reads "PS5 - 1 hr 30 min - two players"; the log wants the note on
+                // its own, with the time in its own column (owner, 5 Nov 2026: separate columns,
+                // not one cell holding both). Stripped by building the exact same text from
+                // PlayMinutes rather than guessing where the time ends.
+                Note = Ps5Note(note, b.PlayMinutes),
                 PaymentType = credit != null ? (b.CashAmount + b.OnlineAmount > 0 ? "Split + Credit" : "Credit") : (b.PaymentType?.ToString() ?? "Unknown"),
                 Cash = b.CashAmount,
                 Online = b.OnlineAmount,
@@ -350,6 +406,17 @@ public class EodController : ControllerBase
 
         return Ok(ApiResponse<object>.Ok(new {
             Daily = dailyReport,
+            // Per day and in total: what actually came in. The page shows this instead of the
+            // billed figure, so it can never disagree with the daily cards an operator sees.
+            CollectedDaily = collectedDaily,
+            Collected = new
+            {
+                Total = collectedDaily.Sum(d => d.Collected),
+                Cash = collectedDaily.Sum(d => d.Cash),
+                Online = collectedDaily.Sum(d => d.Online),
+                CashInwards = collectedDaily.Sum(d => d.CashInwards),
+                PaidOut = collectedDaily.Sum(d => d.PaidOut),
+            },
             Monthly = monthlyReport,
             Discounts = discountAudit,
             AllBills = combinedBills,
@@ -362,6 +429,28 @@ public class EodController : ControllerBase
     }
 
     private Guid GetBranchId() => Guid.Parse(HttpContext.Items["BranchId"]!.ToString()!);
+
+    /// <summary>"1 hr 30 min" - the same text CreatePs5BillAsync puts on the bill line.</summary>
+    private static string Ps5PlayTime(int minutes)
+    {
+        var h = minutes / 60;
+        var m = minutes % 60;
+        return h > 0 && m > 0 ? $"{h} hr {m} min" : h > 0 ? $"{h} hr" : $"{m} min";
+    }
+
+    /// <summary>Just the operator's own note, with "PS5" and the play time taken off the front.</summary>
+    private static string Ps5Note(string itemName, int? playMinutes)
+    {
+        var text = itemName.StartsWith("PS5 - ", StringComparison.Ordinal) ? itemName[6..]
+            : itemName == "PS5" ? "" : itemName;
+        if (playMinutes is { } mins)
+        {
+            var time = Ps5PlayTime(mins);
+            if (text.StartsWith(time, StringComparison.Ordinal))
+                text = text[time.Length..].TrimStart(' ', '-');
+        }
+        return text;
+    }
 
     [HttpGet("report")]
     [HttpGet("preview")]

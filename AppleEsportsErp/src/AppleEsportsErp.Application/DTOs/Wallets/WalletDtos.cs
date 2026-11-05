@@ -67,6 +67,19 @@ public class WalletTopUpRulesDto
     [Required]
     [Range(0, 1000)]
     public decimal DefaultBonusPercent { get; set; }
+
+    public List<BonusTierDto>? BonusTiers { get; set; }
+}
+
+public class BonusTierDto
+{
+    [Required]
+    [Range(1, double.MaxValue)]
+    public decimal MinAmount { get; set; }
+
+    [Required]
+    [Range(0, 1000)]
+    public decimal BonusPercent { get; set; }
 }
 
 public class DeductWalletDto

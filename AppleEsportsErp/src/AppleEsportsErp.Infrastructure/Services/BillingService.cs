@@ -199,6 +199,7 @@ public class BillingService : IBillingService
         var amount = Math.Round(dto.Amount, 2);
         if (amount <= 0) throw new AppException("Enter the PS5 amount.");
         if (string.IsNullOrWhiteSpace(dto.CustomerName)) throw new AppException("Enter the customer's name.");
+        if (dto.PlayMinutes is < 1 or > 1440) throw new AppException("Enter how long they played.");
 
         var now = DateTimeOffset.UtcNow;
         var note = string.IsNullOrWhiteSpace(dto.Note) ? null : dto.Note.Trim();
@@ -215,6 +216,7 @@ public class BillingService : IBillingService
             Subtotal = amount,
             TotalAmount = amount,
             Status = BillStatus.Pending,
+            PlayMinutes = dto.PlayMinutes,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -223,7 +225,7 @@ public class BillingService : IBillingService
             Id = Guid.NewGuid(),
             BillId = bill.Id,
             ItemType = "gaming",
-            ItemName = note is null ? "PS5" : $"PS5 - {note}",
+            ItemName = note is null ? $"PS5 - {PlayTime(dto.PlayMinutes)}" : $"PS5 - {PlayTime(dto.PlayMinutes)} - {note}",
             Quantity = 1,
             UnitPrice = amount,
             TotalPrice = amount,
@@ -243,10 +245,18 @@ public class BillingService : IBillingService
             BranchId = branchId,
             TargetType = "bill",
             TargetId = bill.Id,
-            Details = new { bill.BillNumber, Amount = amount, bill.CustomerName, dto.CustomerPhone, Note = note, ShiftId = bill.ShiftId },
+            Details = new { bill.BillNumber, Amount = amount, bill.CustomerName, dto.CustomerPhone, Note = note, dto.PlayMinutes, ShiftId = bill.ShiftId },
         });
 
         return await GetBillAsync(branchId, bill.Id);
+    }
+
+    /// <summary>"1 hr 30 min", the way an operator would say it.</summary>
+    private static string PlayTime(int minutes)
+    {
+        var h = minutes / 60;
+        var m = minutes % 60;
+        return h > 0 && m > 0 ? $"{h} hr {m} min" : h > 0 ? $"{h} hr" : $"{m} min";
     }
 
     public async Task<BillDto> ApplyDiscountAsync(Guid branchId, Guid actorId, string actorRole, Guid id, ApplyDiscountDto dto)

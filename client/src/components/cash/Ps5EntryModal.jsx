@@ -15,6 +15,9 @@ export default function Ps5EntryModal({ onClose, onDone }) {
   const [amount, setAmount] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  // Typed the way an operator says it - "1 hr", "1 hr 30 min", "30 min" - rather than 1.5.
+  const [hours, setHours] = useState('');
+  const [minutes, setMinutes] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -23,7 +26,8 @@ export default function Ps5EntryModal({ onClose, onDone }) {
   const [idemKey] = useState(generateIdempotencyKey);
 
   const value = Number(amount);
-  const valid = value > 0 && customerName.trim().length > 0;
+  const playMinutes = (Number(hours) || 0) * 60 + (Number(minutes) || 0);
+  const valid = value > 0 && customerName.trim().length > 0 && playMinutes > 0 && playMinutes <= 1440;
 
   const create = async (e) => {
     e.preventDefault();
@@ -33,6 +37,7 @@ export default function Ps5EntryModal({ onClose, onDone }) {
     try {
       const res = await api.post('/bills/ps5', {
         amount: value,
+        playMinutes,
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim() || undefined,
         note: note.trim() || undefined,
@@ -85,12 +90,39 @@ export default function Ps5EntryModal({ onClose, onDone }) {
               />
             </label>
             <label className="block">
-              <span className="text-xs text-text-3 uppercase tracking-wider font-bold">Customer name</span>
+              <span className="text-xs text-text-3 uppercase tracking-wider font-bold">Person</span>
               <input
                 value={customerName} onChange={(e) => setCustomerName(e.target.value)} maxLength={100}
+                placeholder="Customer's name"
                 className="mt-1 w-full bg-bg border border-border rounded px-3 py-2 text-text outline-none focus:border-accent"
               />
             </label>
+
+            <div>
+              <span className="text-xs text-text-3 uppercase tracking-wider font-bold">How long they played</span>
+              <div className="mt-1 grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2 bg-bg border border-border rounded px-3 focus-within:border-accent">
+                  <input
+                    type="number" min="0" max="24" step="1" inputMode="numeric"
+                    value={hours} onChange={(e) => setHours(e.target.value)} placeholder="0"
+                    className="w-full bg-transparent py-2 font-mono text-text outline-none"
+                  />
+                  <span className="text-text-3 text-xs shrink-0">hr</span>
+                </div>
+                <div className="flex items-center gap-2 bg-bg border border-border rounded px-3 focus-within:border-accent">
+                  <input
+                    type="number" min="0" max="59" step="1" inputMode="numeric"
+                    value={minutes} onChange={(e) => setMinutes(e.target.value)} placeholder="0"
+                    className="w-full bg-transparent py-2 font-mono text-text outline-none"
+                  />
+                  <span className="text-text-3 text-xs shrink-0">min</span>
+                </div>
+              </div>
+              <span className="block mt-1 text-[11px] text-text-3">
+                For 1 hour 30 minutes put 1 and 30. For half an hour leave hr empty and put 30.
+                This is for your record only - the price is whatever you type above.
+              </span>
+            </div>
             <label className="block">
               <span className="text-xs text-text-3 uppercase tracking-wider font-bold">Phone (needed for credit)</span>
               <input
@@ -110,7 +142,7 @@ export default function Ps5EntryModal({ onClose, onDone }) {
               type="submit" disabled={!valid || saving}
               className="btn-primary w-full py-3 disabled:opacity-50"
             >
-              {saving ? 'Creating…' : valid ? `Next: take ₹${value} payment` : 'Next: take payment'}
+              {saving ? 'Creating…' : valid ? `Next: take ₹${value} payment` : 'Fill amount, person and time'}
             </button>
           </form>
         ) : (

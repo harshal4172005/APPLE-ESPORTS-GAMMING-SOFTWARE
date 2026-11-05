@@ -12,7 +12,7 @@
 ; ============================================================================
 
 #define AppName        "Apple Esports"
-#define AppVersion     "3.1.136"
+#define AppVersion     "3.1.137"
 #define AppPublisher   "Apple Esports"
 #define Staging        "branch\staging"
 

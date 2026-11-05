@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getSystemConfigs, saveSystemConfig, getWalletTopUpRules, saveWalletTopUpRules, testEmailConfig } from '../../api/settings.api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/ui/Toast';
-import { Save, Wallet, Send } from 'lucide-react';
+import { Save, Wallet, Send, Plus, Trash2 } from 'lucide-react';
 
 // ── Lets an admin find out *why* mail isn't arriving without reading a log file on the
 // server. SendEmailAsync (the real forgot-password/top-up path) never throws - a wrong app
@@ -59,28 +59,44 @@ function TestEmailButton({ defaultTo }) {
 
 function WalletTopUpSettingsCard() {
   const toast = useToast();
-  const [rules, setRules] = useState({ minGamingTopUp: 500, defaultBonusPercent: 10 });
+  const [minTopUp, setMinTopUp] = useState(500);
+  const [defaultBonus, setDefaultBonus] = useState(0);
+  const [tiers, setTiers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     getWalletTopUpRules()
-      .then(res => res?.data && setRules(res.data))
+      .then(res => {
+        if (res?.data) {
+          setMinTopUp(res.data.minGamingTopUp);
+          setDefaultBonus(res.data.defaultBonusPercent);
+          setTiers(res.data.bonusTiers || []);
+        }
+      })
       .catch(() => toast.error('Failed to load Member Amount top-up settings'))
       .finally(() => setLoading(false));
   }, []);
 
+  const addTier = () => setTiers(t => [...t, { minAmount: '', bonusPercent: '' }]);
+  const removeTier = (i) => setTiers(t => t.filter((_, idx) => idx !== i));
+  const updateTier = (i, field, val) => setTiers(t => t.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
+
   const handleSave = async (e) => {
     e.preventDefault();
-    const formData = new FormData(e.target);
+    const validTiers = tiers
+      .filter(t => Number(t.minAmount) > 0 && Number(t.bonusPercent) >= 0)
+      .map(t => ({ minAmount: Number(t.minAmount), bonusPercent: Number(t.bonusPercent) }))
+      .sort((a, b) => a.minAmount - b.minAmount);
     const payload = {
-      minGamingTopUp: Number(formData.get('minGamingTopUp')),
-      defaultBonusPercent: Number(formData.get('defaultBonusPercent')),
+      minGamingTopUp: Number(minTopUp),
+      defaultBonusPercent: Number(defaultBonus),
+      bonusTiers: validTiers,
     };
     setSaving(true);
     try {
       await saveWalletTopUpRules(payload);
-      setRules(payload);
+      setTiers(validTiers);
       toast.success('Member Amount top-up settings saved');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to save Member Amount top-up settings');
@@ -100,13 +116,60 @@ function WalletTopUpSettingsCard() {
       <div className="grid grid-cols-2 gap-4">
         <div className="form-group">
           <label>Minimum Gaming Top-Up (₹)</label>
-          <input type="number" min="1" name="minGamingTopUp" defaultValue={rules.minGamingTopUp} className="form-control" />
+          <input type="number" min="1" value={minTopUp} onChange={e => setMinTopUp(e.target.value)} className="form-control" />
         </div>
         <div className="form-group">
           <label>Default Bonus (%)</label>
-          <input type="number" min="0" step="0.1" name="defaultBonusPercent" defaultValue={rules.defaultBonusPercent} className="form-control" />
+          <input type="number" min="0" step="0.1" value={defaultBonus} onChange={e => setDefaultBonus(e.target.value)} className="form-control" />
+          <span className="text-[10px] text-text-3 mt-1 block">Used when no tier matches the top-up amount</span>
         </div>
       </div>
+
+      <div className="mt-5 border-t border-border pt-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h4 className="text-xs font-bold text-text uppercase tracking-widest">Bonus Tiers</h4>
+            <p className="text-[10px] text-text-3 mt-0.5">Specific bonus % for specific top-up amounts. The highest matching tier wins.</p>
+          </div>
+          <button type="button" onClick={addTier} className="flex items-center gap-1 px-2.5 py-1 rounded border border-accent/40 bg-accent/10 text-accent text-[11px] font-bold uppercase tracking-wider hover:bg-accent/20 transition-colors">
+            <Plus size={12} /> Add Tier
+          </button>
+        </div>
+        {tiers.length === 0 && (
+          <p className="text-[11px] text-text-3 italic">No tiers — every top-up uses the default bonus % above.</p>
+        )}
+        <div className="space-y-2">
+          {tiers.map((tier, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <div className="flex-1">
+                <input
+                  type="number" min="1" placeholder="Min ₹ amount"
+                  value={tier.minAmount} onChange={e => updateTier(i, 'minAmount', e.target.value)}
+                  className="form-control text-sm"
+                />
+              </div>
+              <span className="text-text-3 text-xs font-bold">→</span>
+              <div className="w-24">
+                <input
+                  type="number" min="0" step="0.1" placeholder="%"
+                  value={tier.bonusPercent} onChange={e => updateTier(i, 'bonusPercent', e.target.value)}
+                  className="form-control text-sm"
+                />
+              </div>
+              <span className="text-text-3 text-[10px]">%</span>
+              <button type="button" onClick={() => removeTier(i)} className="p-1.5 rounded text-neon-red/60 hover:text-neon-red hover:bg-neon-red/10 transition-colors">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+        {tiers.length > 0 && (
+          <p className="text-[10px] text-text-3 mt-2">
+            Example: if tiers are ₹500 → 5% and ₹1000 → 10%, a ₹700 top-up gets 5% bonus, ₹1500 gets 10%.
+          </p>
+        )}
+      </div>
+
       <div className="flex justify-end mt-4">
         <button type="submit" disabled={saving} className="btn-primary flex items-center gap-2 shadow-lg shadow-accent/25 disabled:opacity-50">
           <Save size={14} /> {saving ? 'SAVING...' : 'SAVE MEMBER AMOUNT SETTINGS'}

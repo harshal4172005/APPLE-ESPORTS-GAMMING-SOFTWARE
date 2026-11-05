@@ -216,6 +216,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.Property<Guid?>("PcId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("PlayMinutes")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("SessionId")
                         .HasColumnType("uuid");
 
@@ -2181,6 +2184,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.Property<decimal?>("CurrentSessionPackagePrice")
                         .HasColumnType("numeric");
 
+                    b.Property<int>("CurrentSessionPausedSeconds")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("CurrentSessionPlannedDurationMin")
                         .HasColumnType("integer");
 
@@ -2664,6 +2670,15 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.Property<int>("Count")
                         .HasColumnType("integer");
 
+                    b.Property<DateTimeOffset?>("CountedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CountedByBranchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CountedByName")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2916,6 +2931,9 @@ namespace AppleEsportsErp.Infrastructure.Migrations
                     b.Property<string>("Lines")
                         .IsRequired()
                         .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset?>("OpenedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid?>("OperatorId")
                         .HasColumnType("uuid");

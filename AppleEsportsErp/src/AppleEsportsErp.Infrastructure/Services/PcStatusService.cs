@@ -152,6 +152,8 @@ public class PcStatusService : IPcStatusService
                     dto.TotalAmount = activeBill?.TotalAmount ?? session.TotalAmount;
                 }
 
+                dto.PausedSeconds = session.PausedSeconds;
+
                 if (session.EndTime.HasValue)
                     dto.SessionEndTime = session.EndTime;
             }
@@ -170,11 +172,12 @@ public class PcStatusService : IPcStatusService
                 dto.ActiveSessionId = pc.CurrentSessionId;
                 dto.SessionStartTime = pc.CurrentSessionStartTime;
                 dto.SessionEndTime = pc.CurrentSessionEndTime;
+                dto.PausedSeconds = pc.CurrentSessionPausedSeconds;
 
                 if (pc.State == PcState.Active && pc.CurrentSessionStartTime.HasValue)
                 {
                     decimal elapsedMinutes = SessionTimeCalculator.ElapsedMinutes(
-                        pc.CurrentSessionStartTime.Value, 0, now);
+                        pc.CurrentSessionStartTime.Value, pc.CurrentSessionPausedSeconds, now);
                     // Package-aware from the heartbeat snapshot (Pc.CurrentSessionPackagePrice) -
                     // Head Office has no local Session row to read this from directly.
                     dto.TotalAmount = SessionPricingCalculator.CalculateLiveGamingAmount(

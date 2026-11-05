@@ -42,6 +42,7 @@ public class PcStatusDto
     public decimal RatePerHour { get; set; }   // For live charge calculation on frontend
     public int BufferMinutes { get; set; }     // Free grace period before billing starts (from PricingProfile)
     public decimal TotalAmount { get; set; }   // Actual total accumulated charge for the session (gaming + food), live for Active sessions
+    public int PausedSeconds { get; set; }    // Downtime credited back — the client subtracts this from wall-clock elapsed
     public decimal FoodAmount { get; set; }    // Food/add-on portion of TotalAmount, so the frontend can tick the gaming portion between polls without drifting
     public string? Zone { get; set; }           // Standard / VIP / Console / Streaming
     public string? MonitorHz { get; set; }
